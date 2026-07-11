@@ -10,6 +10,8 @@ type IConnection interface {
 	Stop()
 	//从当前连接获取原始的socket
 	GetConnId() uint32
+	//获取当前连接的原生socket
+	GetConnection() net.Conn
 }
 
 /*

@@ -2,6 +2,7 @@ package gnet
 
 import (
 	"Ginx/gface"
+	"Ginx/utils"
 	"errors"
 	"fmt"
 	"net"
@@ -18,6 +19,12 @@ type Server struct {
 	IP string
 	//服务绑定的端口
 	Port int
+	//当前服务绑定的路由
+	Router gface.IRouter
+}
+
+func (s *Server) AddRouter(router gface.IRouter) {
+	s.Router = router
 }
 
 // 当前客户端连接的回调方法
@@ -71,7 +78,7 @@ func (s *Server) Start() {
 			//TODO Server.Start() 设置服务器最大连接控制,如果超过最大连接，那么则关闭此新的连接
 
 			//TODO Server.Start() 处理该新连接请求的 业务 方法， 此时应该有 handler 和 conn是绑定的
-			conntion := NewConntion(conn, cid, CallBackToClient)
+			conntion := NewConntion(conn, cid, nil, CallBackToClient)
 			//增加
 			cid++
 
@@ -101,13 +108,17 @@ func (s *Server) Serve() {
 /*
 创建一个服务器句柄
 */
-func NewServer(name string) gface.IServer {
-	s := &Server{
-		Name:      name,
-		IPVersion: "tcp4",
-		IP:        "0.0.0.0",
-		Port:      7777,
-	}
+func NewServer() gface.IServer {
+	//先初始化全局配置文件
+	utils.GlobalObject.Reload()
 
+	s := &Server{
+		Name:      utils.GlobalObject.Name, //从全局参数获取
+		IPVersion: "tcp4",
+		IP:        utils.GlobalObject.Host,    //从全局参数获取
+		Port:      utils.GlobalObject.TcpPort, //从全局参数获取
+		Router:    nil,
+	}
 	return s
+
 }

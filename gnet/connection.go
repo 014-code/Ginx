@@ -17,16 +17,19 @@ type Connection struct {
 	handleAPI gface.HandFunc
 	//告知该链接已经退出/停止的chan
 	ExitBuffChan chan bool
+	//该连接的处理方法router
+	Router gface.IRouter
 }
 
 // 创建连接对象
-func NewConntion(conn *net.TCPConn, connID uint32, callback_api gface.HandFunc) *Connection {
+func NewConntion(conn *net.TCPConn, connID uint32, router gface.IRouter, callbackFunc gface.HandFunc) *Connection {
 	c := &Connection{
 		Conn:         conn,
 		ConnID:       connID,
 		isClosed:     false,
-		handleAPI:    callback_api,
+		Router:       router,
 		ExitBuffChan: make(chan bool, 1),
+		handleAPI:    callbackFunc,
 	}
 
 	return c
@@ -50,6 +53,19 @@ func (c *Connection) StartReader() {
 			c.ExitBuffChan <- true
 			continue
 		}
+		//得到当前客户端的请求requster数据
+		req := Request{
+			conn: c,
+			data: bytes,
+		}
+
+		go func(requester gface.IRequest) {
+			//注册路由的三个方法
+			c.Router.PreHandle(requester)
+			c.Router.Handle(requester)
+			c.Router.PostHandle(requester)
+
+		}(&req)
 		//调用传入的当前业务方法
 		err = c.handleAPI(c.Conn, bytes, read)
 		if err != nil {
@@ -95,6 +111,10 @@ func (c *Connection) Stop() {
 // 获取连接ID方法
 func (c *Connection) GetConnId() uint32 {
 	return c.ConnID
+}
+
+func (c *Connection) GetConnection() net.Conn {
+	return c.Conn
 }
 
 // 获取原生socket连接方法
