@@ -2,7 +2,9 @@ package gnet
 
 import (
 	"Ginx/gface"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 )
 
@@ -19,6 +21,33 @@ type Connection struct {
 	ExitBuffChan chan bool
 	//该连接的处理方法router
 	Router gface.IRouter
+}
+
+func (c *Connection) RemoteAddr() net.Addr {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (c *Connection) SendMsg(msgId uint32, data []byte) error {
+	if c.isClosed == true {
+		return errors.New("Connection closed when send msg")
+	}
+	//将data封包，并且发送
+	dp := NewDataPack()
+	msg, err := dp.Pack(NewMsgPackage(msgId, data))
+	if err != nil {
+		fmt.Println("Pack error msg id = ", msgId)
+		return errors.New("Pack error msg ")
+	}
+
+	//写回客户端
+	if _, err := c.Conn.Write(msg); err != nil {
+		fmt.Println("Write msg id ", msgId, " error ")
+		c.ExitBuffChan <- true
+		return errors.New("conn Write error")
+	}
+
+	return nil
 }
 
 // 创建连接对象
@@ -44,19 +73,44 @@ func (c *Connection) StartReader() {
 	defer c.Stop()
 	//循环读
 	for {
-		//创建缓冲区
-		bytes := make([]byte, 512)
-		read, err := c.Conn.Read(bytes)
+		//创建连接对象拆包解包对象
+		pack := NewDataPack()
+
+		//读取msg的Head
+		headData := make([]byte, pack.GetHeadLen())
+
+		_, err := io.ReadFull(c.GetTCPConnection(), headData)
 		if err != nil {
-			//出错则告知连接退出
-			fmt.Println("连接读取错误 err:", err, "连接ID:", c.ConnID)
+			fmt.Println("Read Head Data error: ", err)
 			c.ExitBuffChan <- true
 			continue
 		}
+		//拆包
+		msg, err := pack.Unpack(headData)
+		if err != nil {
+			fmt.Println("Unpack Head Data error: ", err)
+			c.ExitBuffChan <- true
+			continue
+		}
+
+		//根据长度读取data
+		//构建一个和长度一样大小的缓冲区，长度头就是后续数据体的内容了
+		var data []byte
+		if msg.GetDataLen() > 0 {
+			data = make([]byte, msg.GetDataLen())
+			_, err := io.ReadFull(c.GetTCPConnection(), data)
+			if err != nil {
+				fmt.Println("Read Head Data error: ", err)
+				c.ExitBuffChan <- true
+				continue
+			}
+		}
+		//set进去
+		msg.SetData(data)
 		//得到当前客户端的请求requster数据
 		req := Request{
 			conn: c,
-			data: bytes,
+			data: msg,
 		}
 
 		go func(requester gface.IRequest) {
@@ -64,15 +118,7 @@ func (c *Connection) StartReader() {
 			c.Router.PreHandle(requester)
 			c.Router.Handle(requester)
 			c.Router.PostHandle(requester)
-
 		}(&req)
-		//调用传入的当前业务方法
-		err = c.handleAPI(c.Conn, bytes, read)
-		if err != nil {
-			fmt.Println("连接业务处理错误 err:", err, "连接ID:", c.ConnID)
-			c.ExitBuffChan <- true
-			return
-		}
 	}
 }
 

@@ -6,7 +6,7 @@ type Request struct {
 	//已经和客户端建立好的连接
 	conn gface.IConnection
 	//客户端的请求数据
-	data []byte
+	data gface.IMessage
 }
 
 // 获取连接信息
@@ -16,5 +16,10 @@ func (r *Request) GetConnection() gface.IConnection {
 
 // 获取连接的请求数据
 func (r *Request) GetData() []byte {
-	return r.data
+	return r.data.GetData()
+}
+
+// 获取请求的消息的ID
+func (r *Request) GetMsgID() uint32 {
+	return r.data.GetMsgID()
 }
