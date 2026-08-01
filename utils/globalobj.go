@@ -28,13 +28,16 @@ var GlobalObject *GlobalObj
 
 // 读取用户的配置文件
 func (g *GlobalObj) Reload() {
-	data, err := ioutil.ReadFile("conf/zinx.json")
+	data, err := ioutil.ReadFile("config/ginx.json")
 	if err != nil {
-		panic(err)
+		data, err = ioutil.ReadFile("../config/ginx.json")
+		if err != nil {
+			return
+		}
 	}
 	//将json数据解析到struct中
 	//fmt.Printf("json :%s\n", data)
-	err = json.Unmarshal(data, &GlobalObject)
+	err = json.Unmarshal(data, g)
 	if err != nil {
 		panic(err)
 	}

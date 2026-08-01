@@ -19,12 +19,12 @@ type Server struct {
 	IP string
 	//服务绑定的端口
 	Port int
-	//当前服务绑定的路由
-	Router gface.IRouter
+	//当前Server的消息管理模块，用来绑定MsgId和对应的处理方法
+	msgHandler gface.IMsgHandle
 }
 
-func (s *Server) AddRouter(router gface.IRouter) {
-	s.Router = router
+func (s *Server) AddRouter(msgId uint32, router gface.IRouter) {
+	s.msgHandler.AddRouter(msgId, router)
 }
 
 // 当前客户端连接的回调方法
@@ -78,12 +78,12 @@ func (s *Server) Start() {
 			//TODO Server.Start() 设置服务器最大连接控制,如果超过最大连接，那么则关闭此新的连接
 
 			//TODO Server.Start() 处理该新连接请求的 业务 方法， 此时应该有 handler 和 conn是绑定的
-			conntion := NewConntion(conn, cid, nil, CallBackToClient)
+			conntion := NewConntion(conn, cid, s.msgHandler)
 			//增加
 			cid++
 
 			//调用当前连接的开启方法
-			conntion.Start()
+			go conntion.Start()
 		}
 	}()
 }
@@ -113,11 +113,11 @@ func NewServer() gface.IServer {
 	utils.GlobalObject.Reload()
 
 	s := &Server{
-		Name:      utils.GlobalObject.Name, //从全局参数获取
-		IPVersion: "tcp4",
-		IP:        utils.GlobalObject.Host,    //从全局参数获取
-		Port:      utils.GlobalObject.TcpPort, //从全局参数获取
-		Router:    nil,
+		Name:       utils.GlobalObject.Name, //从全局参数获取
+		IPVersion:  "tcp4",
+		IP:         utils.GlobalObject.Host,    //从全局参数获取
+		Port:       utils.GlobalObject.TcpPort, //从全局参数获取
+		msgHandler: NewMsgHandle(),             //创建MsgHandle
 	}
 	return s
 

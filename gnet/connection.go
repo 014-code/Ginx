@@ -11,23 +11,56 @@ import (
 type Connection struct {
 	//当前连接的socket TCP套接字
 	Conn *net.TCPConn
-	//当前连接的ID SessionID全局唯一
+	//当前连接的ID 也可以称作为SessionID，ID全局唯一
 	ConnID uint32
 	//当前连接的关闭状态
 	isClosed bool
-	//该连接的处理方法api
-	handleAPI gface.HandFunc
-	//告知该链接已经退出/停止的chan
+	//消息管理MsgId和对应处理方法的消息管理模块
+	MsgHandler gface.IMsgHandle
+	//告知该链接已经退出/停止的channel
 	ExitBuffChan chan bool
-	//该连接的处理方法router
-	Router gface.IRouter
+	//无缓冲管道，用于读、写两个goroutine之间的消息通信
+	msgChan chan []byte
 }
 
-func (c *Connection) RemoteAddr() net.Addr {
-	//TODO implement me
-	panic("implement me")
+// 创建连接的方法
+func NewConntion(conn *net.TCPConn, connID uint32, msgHandler gface.IMsgHandle) *Connection {
+	c := &Connection{
+		Conn:         conn,
+		ConnID:       connID,
+		isClosed:     false,
+		MsgHandler:   msgHandler,
+		ExitBuffChan: make(chan bool, 1),
+		msgChan:      make(chan []byte), //msgChan初始化
+	}
+
+	return c
 }
 
+/*
+写消息Goroutine， 用户将数据发送给客户端
+*/
+func (c *Connection) StartWriter() {
+
+	fmt.Println("[Writer Goroutine is running]")
+	defer fmt.Println(c.RemoteAddr().String(), "[conn Writer exit!]")
+
+	for {
+		select {
+		case data := <-c.msgChan:
+			//有数据要写给客户端
+			if _, err := c.Conn.Write(data); err != nil {
+				fmt.Println("Send Data error:, ", err, " Conn Writer exit")
+				return
+			}
+		case <-c.ExitBuffChan:
+			//conn已经关闭
+			return
+		}
+	}
+}
+
+// 直接将Message数据发送数据给远程的TCP客户端
 func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	if c.isClosed == true {
 		return errors.New("Connection closed when send msg")
@@ -41,27 +74,13 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	}
 
 	//写回客户端
-	if _, err := c.Conn.Write(msg); err != nil {
-		fmt.Println("Write msg id ", msgId, " error ")
-		c.ExitBuffChan <- true
-		return errors.New("conn Write error")
-	}
+	c.msgChan <- msg //将之前直接回写给conn.Write的方法 改为 发送给Channel 供Writer读取
 
 	return nil
 }
 
-// 创建连接对象
-func NewConntion(conn *net.TCPConn, connID uint32, router gface.IRouter, callbackFunc gface.HandFunc) *Connection {
-	c := &Connection{
-		Conn:         conn,
-		ConnID:       connID,
-		isClosed:     false,
-		Router:       router,
-		ExitBuffChan: make(chan bool, 1),
-		handleAPI:    callbackFunc,
-	}
-
-	return c
+func (c *Connection) RemoteAddr() net.Addr {
+	return c.Conn.RemoteAddr()
 }
 
 /*
@@ -82,15 +101,13 @@ func (c *Connection) StartReader() {
 		_, err := io.ReadFull(c.GetTCPConnection(), headData)
 		if err != nil {
 			fmt.Println("Read Head Data error: ", err)
-			c.ExitBuffChan <- true
-			continue
+			return
 		}
 		//拆包
 		msg, err := pack.Unpack(headData)
 		if err != nil {
 			fmt.Println("Unpack Head Data error: ", err)
-			c.ExitBuffChan <- true
-			continue
+			return
 		}
 
 		//根据长度读取data
@@ -101,8 +118,7 @@ func (c *Connection) StartReader() {
 			_, err := io.ReadFull(c.GetTCPConnection(), data)
 			if err != nil {
 				fmt.Println("Read Head Data error: ", err)
-				c.ExitBuffChan <- true
-				continue
+				return
 			}
 		}
 		//set进去
@@ -113,19 +129,17 @@ func (c *Connection) StartReader() {
 			data: msg,
 		}
 
-		go func(requester gface.IRequest) {
-			//注册路由的三个方法
-			c.Router.PreHandle(requester)
-			c.Router.Handle(requester)
-			c.Router.PostHandle(requester)
-		}(&req)
+		//从绑定好的消息和对应的处理方法中执行对应的Handle方法
+		go c.MsgHandler.DoMsgHandler(&req)
 	}
 }
 
 // 启动连接
 func (c *Connection) Start() {
-	//开启读取者
+	//1 开启用户从客户端读取数据流程的Goroutine
 	go c.StartReader()
+	//2 开启用于写回客户端数据流程的Goroutine
+	go c.StartWriter()
 
 	for {
 		select {
