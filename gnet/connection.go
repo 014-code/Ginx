@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 )
 
 type Connection struct {
@@ -93,6 +94,14 @@ func (c *Connection) StartReader() {
 	defer c.Stop()
 	//循环读
 	for {
+		if utils.GlobalObject.HeartbeatMax > 0 {
+			deadline := time.Now().Add(time.Duration(utils.GlobalObject.HeartbeatMax) * time.Second)
+			if err := c.GetTCPConnection().SetReadDeadline(deadline); err != nil {
+				fmt.Println("Set read deadline error: ", err)
+				return
+			}
+		}
+
 		//创建连接对象拆包解包对象
 		pack := NewDataPack()
 
@@ -132,7 +141,10 @@ func (c *Connection) StartReader() {
 
 		//从绑定好的消息和对应的处理方法中执行对应的Handle方法
 		if utils.GlobalObject.WorkerPoolSize > 0 {
-			c.MsgHandler.SendMsgToTaskQueue(&req)
+			if err := c.MsgHandler.SendMsgToTaskQueue(&req); err != nil {
+				fmt.Println("Send request to worker queue error: ", err)
+				return
+			}
 		} else {
 			go c.MsgHandler.DoMsgHandler(&req)
 		}

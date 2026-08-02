@@ -3,6 +3,7 @@ package test
 import (
 	"Ginx/gface"
 	"Ginx/gnet"
+	"Ginx/utils"
 	"testing"
 	"time"
 )
@@ -19,6 +20,20 @@ func (r *workerRouter) Handle(request gface.IRequest) {
 
 func (r *workerRouter) PostHandle(gface.IRequest) {}
 
+type blockingRouter struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingRouter) PreHandle(gface.IRequest) {}
+
+func (r *blockingRouter) Handle(gface.IRequest) {
+	r.entered <- struct{}{}
+	<-r.release
+}
+
+func (r *blockingRouter) PostHandle(gface.IRequest) {}
+
 func TestWorkerPoolProcessesRequests(t *testing.T) {
 	setWorkerConfig(t, 2, 4)
 	handler := gnet.NewMsgHandle()
@@ -33,11 +48,13 @@ func TestWorkerPoolProcessesRequests(t *testing.T) {
 		t.Fatalf("TaskQueue length = %d, want %d", len(handler.TaskQueue), 2)
 	}
 
-	handler.SendMsgToTaskQueue(&testRequest{
+	if err := handler.SendMsgToTaskQueue(&testRequest{
 		connection: &testConnection{id: 3},
 		msgID:      7,
 		data:       []byte("login"),
-	})
+	}); err != nil {
+		t.Fatalf("SendMsgToTaskQueue() error = %v", err)
+	}
 
 	select {
 	case got := <-router.requests:
@@ -58,11 +75,13 @@ func TestWorkerPoolPreservesOrderForOneConnection(t *testing.T) {
 
 	connection := &testConnection{id: 5}
 	for _, data := range []string{"first", "second", "third"} {
-		handler.SendMsgToTaskQueue(&testRequest{
+		if err := handler.SendMsgToTaskQueue(&testRequest{
 			connection: connection,
 			msgID:      7,
 			data:       []byte(data),
-		})
+		}); err != nil {
+			t.Fatalf("SendMsgToTaskQueue() error = %v", err)
+		}
 	}
 
 	for _, want := range []string{"first", "second", "third"} {
@@ -83,11 +102,13 @@ func TestMessageHandlerFallsBackWithoutWorkerPool(t *testing.T) {
 	router := &workerRouter{requests: make(chan string, 1)}
 	handler.AddRouter(7, router)
 
-	handler.SendMsgToTaskQueue(&testRequest{
+	if err := handler.SendMsgToTaskQueue(&testRequest{
 		connection: &testConnection{id: 1},
 		msgID:      7,
 		data:       []byte("fallback"),
-	})
+	}); err != nil {
+		t.Fatalf("SendMsgToTaskQueue() error = %v", err)
+	}
 
 	select {
 	case got := <-router.requests:
@@ -97,4 +118,51 @@ func TestMessageHandlerFallsBackWithoutWorkerPool(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for fallback request")
 	}
+}
+
+func TestWorkerPoolRejectsWhenQueueIsFull(t *testing.T) {
+	setWorkerConfig(t, 1, 1)
+	utils.GlobalObject.WorkerTaskQueueWaitTime = 20
+	handler := gnet.NewMsgHandle()
+	router := &blockingRouter{
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	handler.AddRouter(7, router)
+	handler.StartWorkerPool()
+
+	connection := &testConnection{id: 0}
+	if err := handler.SendMsgToTaskQueue(&testRequest{
+		connection: connection,
+		msgID:      7,
+		data:       []byte("running"),
+	}); err != nil {
+		t.Fatalf("SendMsgToTaskQueue() error = %v", err)
+	}
+
+	select {
+	case <-router.entered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the blocking worker")
+	}
+	if err := handler.SendMsgToTaskQueue(&testRequest{
+		connection: connection,
+		msgID:      7,
+		data:       []byte("queued"),
+	}); err != nil {
+		t.Fatalf("SendMsgToTaskQueue() error = %v", err)
+	}
+
+	err := handler.SendMsgToTaskQueue(&testRequest{
+		connection: connection,
+		msgID:      7,
+		data:       []byte("rejected"),
+	})
+	if err == nil {
+		t.Fatal("SendMsgToTaskQueue() accepted a full queue")
+	}
+	if err.Error() != "worker task queue wait timeout" {
+		t.Fatalf("SendMsgToTaskQueue() error = %q, want queue wait timeout", err)
+	}
+	close(router.release)
 }

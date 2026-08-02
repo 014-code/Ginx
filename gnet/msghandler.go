@@ -3,10 +3,12 @@ package gnet
 import (
 	"Ginx/gface"
 	"Ginx/utils"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type MsgHandle struct {
@@ -87,10 +89,10 @@ func (mh *MsgHandle) StartWorkerPool() {
 }
 
 // 将消息交给TaskQueue,由worker进行处理
-func (mh *MsgHandle) SendMsgToTaskQueue(request gface.IRequest) {
+func (mh *MsgHandle) SendMsgToTaskQueue(request gface.IRequest) error {
 	if mh.WorkerPoolSize == 0 || !mh.workerPoolStarted.Load() {
 		go mh.DoMsgHandler(request)
-		return
+		return nil
 	}
 
 	//根据ConnID来分配当前的连接应该由哪个worker负责处理
@@ -100,5 +102,23 @@ func (mh *MsgHandle) SendMsgToTaskQueue(request gface.IRequest) {
 	workerID := request.GetConnection().GetConnId() % mh.WorkerPoolSize
 	fmt.Println("Add ConnID=", request.GetConnection().GetConnId(), " request msgID=", request.GetMsgID(), "to workerID=", workerID)
 	//将请求消息发送给任务队列
-	mh.TaskQueue[workerID] <- request
+	queue := mh.TaskQueue[workerID]
+	waitTime := time.Duration(utils.GlobalObject.WorkerTaskQueueWaitTime) * time.Millisecond
+	if waitTime <= 0 {
+		select {
+		case queue <- request:
+			return nil
+		default:
+			return errors.New("worker task queue is full")
+		}
+	}
+
+	timer := time.NewTimer(waitTime)
+	defer timer.Stop()
+	select {
+	case queue <- request:
+		return nil
+	case <-timer.C:
+		return errors.New("worker task queue wait timeout")
+	}
 }

@@ -3,6 +3,7 @@ package test
 import (
 	"Ginx/gface"
 	"Ginx/gnet"
+	"Ginx/utils"
 	"testing"
 	"time"
 )
@@ -47,6 +48,81 @@ func TestConnectionFallsBackWithoutWorkerPool(t *testing.T) {
 	client, startDone := startTestConnection(t, handler)
 	writeTestMessage(t, client, 1, []byte("fallback"))
 	assertReply(t, client, 10, []byte("fallback accepted"))
+
+	client.Close()
+	waitForConnectionStop(t, startDone)
+}
+
+func TestConnectionClosesWhenWorkerQueueIsFull(t *testing.T) {
+	setWorkerConfig(t, 1, 1)
+	utils.GlobalObject.WorkerTaskQueueWaitTime = 20
+	handler := gnet.NewMsgHandle()
+	router := &blockingRouter{
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	defer close(router.release)
+	handler.AddRouter(1, router)
+	handler.StartWorkerPool()
+
+	client, startDone := startTestConnection(t, handler)
+	writeTestMessage(t, client, 1, []byte("running"))
+	select {
+	case <-router.entered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the blocking worker")
+	}
+
+	writeTestMessage(t, client, 1, []byte("queued"))
+	writeTestMessage(t, client, 1, []byte("rejected"))
+	waitForConnectionStop(t, startDone)
+}
+
+func TestConnectionStopsAfterHeartbeatTimeout(t *testing.T) {
+	setWorkerConfig(t, 0, 4)
+	utils.GlobalObject.HeartbeatMax = 1
+	handler := gnet.NewMsgHandle()
+	client, startDone := startTestConnection(t, handler)
+
+	select {
+	case <-startDone:
+	case <-time.After(2 * time.Second):
+		client.Close()
+		t.Fatal("connection did not stop after heartbeat timeout")
+	}
+}
+
+func TestConnectionRefreshesHeartbeatAfterMessage(t *testing.T) {
+	setWorkerConfig(t, 0, 4)
+	utils.GlobalObject.HeartbeatMax = 1
+	handler := gnet.NewMsgHandle()
+	client, startDone := startTestConnection(t, handler)
+
+	time.Sleep(500 * time.Millisecond)
+	writeTestMessage(t, client, 99, []byte("heartbeat"))
+	time.Sleep(700 * time.Millisecond)
+	select {
+	case <-startDone:
+		t.Fatal("connection timed out before heartbeat was refreshed")
+	default:
+	}
+
+	client.Close()
+	waitForConnectionStop(t, startDone)
+}
+
+func TestConnectionKeepsAliveWhenHeartbeatIsDisabled(t *testing.T) {
+	setWorkerConfig(t, 0, 4)
+	utils.GlobalObject.HeartbeatMax = 0
+	handler := gnet.NewMsgHandle()
+	client, startDone := startTestConnection(t, handler)
+
+	time.Sleep(1200 * time.Millisecond)
+	select {
+	case <-startDone:
+		t.Fatal("connection stopped while heartbeat timeout was disabled")
+	default:
+	}
 
 	client.Close()
 	waitForConnectionStop(t, startDone)
