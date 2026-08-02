@@ -1,22 +1,21 @@
-package gnet
+package test
 
 import (
+	"Ginx/gnet"
+	"Ginx/utils"
 	"bytes"
 	"encoding/binary"
 	"testing"
-
-	"Ginx/utils"
 )
 
 func TestDataPackPackAndUnpack(t *testing.T) {
-	pack := NewDataPack()
-	want := NewMsgPackage(1001, []byte("login request"))
+	pack := gnet.NewDataPack()
+	want := gnet.NewMsgPackage(1001, []byte("login request"))
 
 	data, err := pack.Pack(want)
 	if err != nil {
 		t.Fatalf("Pack() error = %v", err)
 	}
-
 	if got, wantLen := uint32(len(data)), pack.GetHeadLen()+want.GetDataLen(); got != wantLen {
 		t.Fatalf("packet length = %d, want %d", got, wantLen)
 	}
@@ -48,11 +47,11 @@ func TestDataPackRejectsOversizedMessage(t *testing.T) {
 		utils.GlobalObject.MaxPacketSize = oldMaxPacketSize
 	}()
 
-	header := make([]byte, NewDataPack().GetHeadLen())
+	header := make([]byte, gnet.NewDataPack().GetHeadLen())
 	binary.LittleEndian.PutUint32(header[0:4], 5)
 	binary.LittleEndian.PutUint32(header[4:8], 7)
 
-	if _, err := NewDataPack().Unpack(header); err == nil {
+	if _, err := gnet.NewDataPack().Unpack(header); err == nil {
 		t.Fatal("Unpack() accepted a packet larger than MaxPacketSize")
 	}
 }

@@ -2,6 +2,7 @@ package gnet
 
 import (
 	"Ginx/gface"
+	"Ginx/utils"
 	"errors"
 	"fmt"
 	"io"
@@ -130,7 +131,11 @@ func (c *Connection) StartReader() {
 		}
 
 		//从绑定好的消息和对应的处理方法中执行对应的Handle方法
-		go c.MsgHandler.DoMsgHandler(&req)
+		if utils.GlobalObject.WorkerPoolSize > 0 {
+			c.MsgHandler.SendMsgToTaskQueue(&req)
+		} else {
+			go c.MsgHandler.DoMsgHandler(&req)
+		}
 	}
 }
 

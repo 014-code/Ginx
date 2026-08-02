@@ -42,6 +42,7 @@ func CallBackToClient(conn *net.TCPConn, data []byte, cnt int) error {
 // 开启网络服务
 func (s *Server) Start() {
 	fmt.Printf("[START] Server listenner at IP: %s, Port %d, is starting\n", s.IP, s.Port)
+	s.msgHandler.StartWorkerPool()
 
 	//开启一个go去做服务端Linster业务
 	go func() {
