@@ -63,6 +63,22 @@ func main() {
 }
 ```
 
+## 完整教程示例
+
+`main/tutorial` 提供一个可以直接运行的服务端和客户端示例：
+
+```powershell
+go run ./main/tutorial/server
+go run ./main/tutorial/client
+```
+
+请在两个独立终端中运行。服务端注册消息 `0` 和 `1` 两个路由，客户端每两秒发送一次 ping 和 heartbeat 消息，服务端分别返回 `pong` 和 heartbeat 确认。这个示例同时展示了 `DataPack` 的封包/拆包、Worker Pool 的消息处理以及 `HeartbeatMax` 的活跃时间刷新。
+
+示例源码：
+
+- `main/tutorial/server/Server.go`
+- `main/tutorial/client/Client.go`
+
 游戏项目建议给消息 ID 建立集中定义，例如：
 
 | 范围 | 示例 | 用途 |

@@ -1,0 +1,40 @@
+package main
+
+import (
+	"Ginx/gface"
+	"Ginx/gnet"
+	"fmt"
+)
+
+type PingRouter struct {
+	gnet.BaseRouter
+}
+
+func (this *PingRouter) Handle(request gface.IRequest) {
+	fmt.Println("Call PingRouter Handle")
+	fmt.Println("recv from client : msgId=", request.GetMsgID(), ", data=", string(request.GetData()))
+
+	if err := request.GetConnection().SendMsg(0, []byte("pong from tutorial server")); err != nil {
+		fmt.Println(err)
+	}
+}
+
+type HeartbeatRouter struct {
+	gnet.BaseRouter
+}
+
+func (this *HeartbeatRouter) Handle(request gface.IRequest) {
+	fmt.Println("Call HeartbeatRouter Handle")
+	fmt.Println("recv from client : msgId=", request.GetMsgID(), ", data=", string(request.GetData()))
+
+	if err := request.GetConnection().SendMsg(1, []byte("heartbeat accepted")); err != nil {
+		fmt.Println(err)
+	}
+}
+
+func main() {
+	server := gnet.NewServer()
+	server.AddRouter(0, &PingRouter{})
+	server.AddRouter(1, &HeartbeatRouter{})
+	server.Serve()
+}

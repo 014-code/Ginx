@@ -19,6 +19,15 @@ go run ./main/client0
 go run ./main/client1
 ```
 
+A complete tutorial example is available in `main/tutorial`:
+
+```powershell
+go run ./main/tutorial/server
+go run ./main/tutorial/client
+```
+
+Run the server and client in separate terminals. The client sends a ping and a heartbeat message every two seconds.
+
 Run the automated checks with:
 
 ```powershell
@@ -47,6 +56,15 @@ go run ./main/server
 go run ./main/client0
 go run ./main/client1
 ```
+
+完整教程示例位于 `main/tutorial` 目录：
+
+```powershell
+go run ./main/tutorial/server
+go run ./main/tutorial/client
+```
+
+请在两个独立终端中运行服务端和客户端。客户端每两秒发送一次 ping 消息和心跳消息。
 
 运行自动化测试、静态检查和构建验证：
 
