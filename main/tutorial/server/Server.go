@@ -34,6 +34,12 @@ func (this *HeartbeatRouter) Handle(request gface.IRequest) {
 
 func main() {
 	server := gnet.NewServer()
+	server.SetOnConnStart(func(connection gface.IConnection) {
+		fmt.Println("client connected:", connection.GetConnId())
+	})
+	server.SetOnConnStop(func(connection gface.IConnection) {
+		fmt.Println("client disconnected:", connection.GetConnId())
+	})
 	server.AddRouter(0, &PingRouter{})
 	server.AddRouter(1, &HeartbeatRouter{})
 	server.Serve()

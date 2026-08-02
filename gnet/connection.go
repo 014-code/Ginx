@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -16,7 +18,8 @@ type Connection struct {
 	//当前连接的ID 也可以称作为SessionID，ID全局唯一
 	ConnID uint32
 	//当前连接的关闭状态
-	isClosed bool
+	isClosed atomic.Bool
+	stopOnce sync.Once
 	//消息管理MsgId和对应处理方法的消息管理模块
 	MsgHandler gface.IMsgHandle
 	//告知该链接已经退出/停止的channel
@@ -30,7 +33,6 @@ func NewConntion(conn *net.TCPConn, connID uint32, msgHandler gface.IMsgHandle) 
 	c := &Connection{
 		Conn:         conn,
 		ConnID:       connID,
-		isClosed:     false,
 		MsgHandler:   msgHandler,
 		ExitBuffChan: make(chan bool, 1),
 		msgChan:      make(chan []byte), //msgChan初始化
@@ -64,7 +66,7 @@ func (c *Connection) StartWriter() {
 
 // 直接将Message数据发送数据给远程的TCP客户端
 func (c *Connection) SendMsg(msgId uint32, data []byte) error {
-	if c.isClosed == true {
+	if c.isClosed.Load() {
 		return errors.New("Connection closed when send msg")
 	}
 	//将data封包，并且发送
@@ -76,9 +78,12 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	}
 
 	//写回客户端
-	c.msgChan <- msg //将之前直接回写给conn.Write的方法 改为 发送给Channel 供Writer读取
-
-	return nil
+	select {
+	case c.msgChan <- msg:
+		return nil
+	case <-c.ExitBuffChan:
+		return errors.New("Connection closed when send msg")
+	}
 }
 
 func (c *Connection) RemoteAddr() net.Addr {
@@ -169,20 +174,16 @@ func (c *Connection) Start() {
 
 // 停止连接
 func (c *Connection) Stop() {
-	//1. 如果当前链接已经关闭
-	if c.isClosed == true {
-		return
-	}
-	c.isClosed = true
-	//TODO Connection Stop() 如果用户注册了该链接的关闭回调业务，那么在此刻应该显示调用
+	c.stopOnce.Do(func() {
+		c.isClosed.Store(true)
+		// 关闭socket链接
+		c.Conn.Close()
 
-	// 关闭socket链接
-	c.Conn.Close()
-
-	//写入关闭
-	c.ExitBuffChan <- true
-	//关闭所有chan管道
-	close(c.ExitBuffChan)
+		//写入关闭
+		c.ExitBuffChan <- true
+		//关闭所有chan管道
+		close(c.ExitBuffChan)
+	})
 }
 
 // 获取连接ID方法

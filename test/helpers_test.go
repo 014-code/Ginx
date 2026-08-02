@@ -34,6 +34,26 @@ func (c *testConnection) SendMsg(uint32, []byte) error {
 	return nil
 }
 
+type managedTestConnection struct {
+	testConnection
+	stopped chan struct{}
+}
+
+func newManagedTestConnection(id uint32) *managedTestConnection {
+	return &managedTestConnection{
+		testConnection: testConnection{id: id},
+		stopped:        make(chan struct{}),
+	}
+}
+
+func (c *managedTestConnection) Stop() {
+	select {
+	case <-c.stopped:
+	default:
+		close(c.stopped)
+	}
+}
+
 type testRequest struct {
 	connection gface.IConnection
 	msgID      uint32
@@ -61,6 +81,18 @@ func setWorkerConfig(t *testing.T, workerPoolSize uint32, maxWorkerTaskLen uint3
 
 	utils.GlobalObject.WorkerPoolSize = workerPoolSize
 	utils.GlobalObject.MaxWorkerTaskLen = maxWorkerTaskLen
+}
+
+func setServerConfig(t *testing.T, maxConn int) {
+	t.Helper()
+	original := *utils.GlobalObject
+	t.Cleanup(func() {
+		*utils.GlobalObject = original
+	})
+
+	utils.GlobalObject.MaxConn = maxConn
+	utils.GlobalObject.WorkerPoolSize = 0
+	utils.GlobalObject.HeartbeatMax = 0
 }
 
 func newTCPPair(t *testing.T) (*net.TCPConn, *net.TCPConn) {

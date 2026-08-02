@@ -2,7 +2,7 @@
 
 ## English
 
-Ginx is a lightweight Go game-server framework with length-prefixed messages, message-ID routing, per-connection read/write goroutines, configurable worker pools, and router lifecycle hooks.
+Ginx is a lightweight Go game-server framework with length-prefixed messages, message-ID routing, per-connection read/write goroutines, configurable worker pools, connection lifecycle hooks, and graceful shutdown.
 
 ### Quick start
 
@@ -40,7 +40,7 @@ See the [game server guide](docs/game-server-guide.md) for the message protocol,
 
 ## 中文
 
-Ginx 是一个轻量级 Go 游戏服务端框架，提供长度前缀消息协议、按消息 ID 路由、单连接读写协程、可配置 Worker 工作池和路由生命周期钩子。
+Ginx 是一个轻量级 Go 游戏服务端框架，提供长度前缀消息协议、按消息 ID 路由、单连接读写协程、可配置 Worker 工作池、连接生命周期钩子和优雅停服。
 
 ### 快速开始
 

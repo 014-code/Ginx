@@ -9,7 +9,9 @@
 - 每条连接独立的读协程和写协程，业务处理在独立协程中执行。
 - 可配置的 Worker 工作池，按连接 ID 将同一连接的消息分配到同一个队列。
 - 单条消息的最大长度校验，避免异常长度导致无限制内存分配。
-- 连接断开后自动结束连接主循环。
+- 连接管理器支持按 ID 获取、移除和批量关闭连接，并通过 `MaxConn` 限制在线连接数。
+- 可注册连接建立与断开钩子，用于初始化会话、上线通知和断线清理。
+- `Server.Stop()` 会停止接收新连接、关闭所有连接并等待 Worker 队列完成已入队任务。
 
 连接、房间、AOI、玩家状态和可靠性策略属于业务层，可以在路由和连接管理器之上继续扩展。
 
@@ -58,6 +60,12 @@ func (r *LoginRouter) Handle(request gface.IRequest) {
 
 func main() {
     server := gnet.NewServer()
+    server.SetOnConnStart(func(connection gface.IConnection) {
+        fmt.Println("player connected:", connection.GetConnId())
+    })
+    server.SetOnConnStop(func(connection gface.IConnection) {
+        fmt.Println("player disconnected:", connection.GetConnId())
+    })
     server.AddRouter(1001, &LoginRouter{})
     server.Serve()
 }
@@ -78,6 +86,19 @@ go run ./main/tutorial/client
 
 - `main/tutorial/server/Server.go`
 - `main/tutorial/client/Client.go`
+
+## 连接管理和停服
+
+`GetConnMgr()` 返回连接管理器，可在游戏业务中按连接 ID 查询连接并向指定玩家发送消息。连接 ID 由服务端递增分配，连接断开后会自动从管理器移除。
+
+```go
+connection, err := server.GetConnMgr().Get(playerConnID)
+if err == nil {
+    _ = connection.SendMsg(4001, []byte("server announcement"))
+}
+```
+
+当 `MaxConn > 0` 时，达到上限后的新 TCP 连接会立即关闭；`MaxConn <= 0` 表示不限制连接数。应用关闭时调用 `server.Stop()`：监听器先关闭，现有连接随后关闭，已经进入 Worker 队列的任务会被处理完成后退出。
 
 游戏项目建议给消息 ID 建立集中定义，例如：
 
@@ -110,6 +131,7 @@ N bytes  data
 - 需要顺序一致性的业务应在业务层增加玩家锁、串行队列或状态机。
 - 路由中不要直接操作另一个连接的底层 socket；跨玩家推送应通过连接管理器统一调度。
 - 连接会在 `HeartbeatMax` 时间内没有收到完整消息时自动关闭；客户端可以通过心跳消息刷新连接活跃时间。
+- 调用 `Server.Stop()` 后不再接收新连接；连接关闭钩子可用于持久化玩家状态或回收房间资源。
 - 断线清理、登录态校验、重连恢复和消息幂等需要由游戏业务层实现。
 
 ## 测试和提交前检查
@@ -122,8 +144,8 @@ go vet ./...
 go build ./...
 ```
 
-测试文件统一位于 `test/` 目录，覆盖数据包编码解码、超长包拒绝、消息 ID 路由、Worker 分发、同连接顺序、队列满拒绝、零 Worker 回退、真实 TCP 收发以及心跳超时。
+测试文件统一位于 `test/` 目录，覆盖数据包编码解码、超长包拒绝、消息 ID 路由、Worker 分发、同连接顺序、队列满拒绝、Worker 停服排空、零 Worker 回退、真实 TCP 收发、心跳超时、连接管理和服务生命周期。
 
 ## 当前边界
 
-当前 `Server.Stop` 仍是预留接口，服务进程通常通过进程生命周期停止。生产环境接入前还应补充监听器关闭、连接管理、连接数限制、日志和指标、优雅停服以及协议版本兼容策略。
+当前版本已提供基础的连接管理、连接数限制、生命周期钩子和优雅停服。生产环境接入前还应补充结构化日志与指标、进程信号处理、房间/玩家状态持久化、连接级背压策略以及协议版本兼容策略。

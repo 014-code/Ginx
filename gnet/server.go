@@ -6,32 +6,50 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"time"
+	"sync"
+	"sync/atomic"
 )
 
-// iServer 接口实现，定义一个Server服务类
 type Server struct {
-	//服务器的名称
-	Name string
-	//tcp4 or other
+	Name      string
 	IPVersion string
-	//服务绑定的IP地址
-	IP string
-	//服务绑定的端口
-	Port int
-	//当前Server的消息管理模块，用来绑定MsgId和对应的处理方法
+	IP        string
+	Port      int
+
 	msgHandler gface.IMsgHandle
+	connMgr    *ConnManager
+
+	listenerLock sync.Mutex
+	listener     *net.TCPListener
+	startOnce    sync.Once
+	stopOnce     sync.Once
+	stopChan     chan struct{}
+	stopped      atomic.Bool
+	connWait     sync.WaitGroup
+
+	onConnStart gface.HookFunc
+	onConnStop  gface.HookFunc
 }
 
 func (s *Server) AddRouter(msgId uint32, router gface.IRouter) {
 	s.msgHandler.AddRouter(msgId, router)
 }
 
+func (s *Server) SetOnConnStart(hookFunc gface.HookFunc) {
+	s.onConnStart = hookFunc
+}
+
+func (s *Server) SetOnConnStop(hookFunc gface.HookFunc) {
+	s.onConnStop = hookFunc
+}
+
+func (s *Server) GetConnMgr() gface.IConnManager {
+	return s.connMgr
+}
+
 // 当前客户端连接的回调方法
 func CallBackToClient(conn *net.TCPConn, data []byte, cnt int) error {
-	//回显业务
 	fmt.Println("[Conn Handle] CallBackToClient ... ")
-	//向当前客户端中写入数据
 	if _, err := conn.Write(data[:cnt]); err != nil {
 		fmt.Println("write back buf err ", err)
 		return errors.New("CallBackToClient error")
@@ -39,87 +57,132 @@ func CallBackToClient(conn *net.TCPConn, data []byte, cnt int) error {
 	return nil
 }
 
-// 开启网络服务
 func (s *Server) Start() {
-	fmt.Printf("[START] Server listenner at IP: %s, Port %d, is starting\n", s.IP, s.Port)
-	s.msgHandler.StartWorkerPool()
-
-	//开启一个go去做服务端Linster业务
-	go func() {
-		//获取一个TCP的Addr
-		addr, err := net.ResolveTCPAddr(s.IPVersion, fmt.Sprintf("%s:%d", s.IP, s.Port))
-		if err != nil {
-			fmt.Println("resolve tcp addr err: ", err)
+	s.startOnce.Do(func() {
+		if s.stopped.Load() {
 			return
 		}
 
-		//监听服务器地址
-		listenner, err := net.ListenTCP(s.IPVersion, addr)
+		fmt.Printf("[START] Server listenner at IP: %s, Port %d, is starting\n", s.IP, s.Port)
+		s.msgHandler.StartWorkerPool()
+		s.connWait.Add(1)
+		go s.startAccept()
+	})
+}
+
+func (s *Server) startAccept() {
+	defer s.connWait.Done()
+
+	addr, err := net.ResolveTCPAddr(s.IPVersion, fmt.Sprintf("%s:%d", s.IP, s.Port))
+	if err != nil {
+		fmt.Println("resolve tcp addr err: ", err)
+		s.signalStop()
+		s.msgHandler.StopWorkerPool()
+		return
+	}
+
+	listener, err := net.ListenTCP(s.IPVersion, addr)
+	if err != nil {
+		fmt.Println("listen", s.IPVersion, "err", err)
+		s.signalStop()
+		s.msgHandler.StopWorkerPool()
+		return
+	}
+
+	s.listenerLock.Lock()
+	if s.stopped.Load() {
+		s.listenerLock.Unlock()
+		listener.Close()
+		return
+	}
+	s.listener = listener
+	s.listenerLock.Unlock()
+
+	fmt.Println("start Zinx server  ", s.Name, " succ, now listenning...")
+	var cid uint32
+
+	for {
+		conn, err := listener.AcceptTCP()
 		if err != nil {
-			fmt.Println("listen", s.IPVersion, "err", err)
-			return
-		}
-
-		//已经监听成功
-		fmt.Println("start Zinx server  ", s.Name, " succ, now listenning...")
-
-		//生成一个全局连接ID
-		var cid uint32
-		cid = 0
-
-		//启动server网络连接业务
-		for {
-			//阻塞等待客户端建立连接请求
-			conn, err := listenner.AcceptTCP()
-			if err != nil {
-				fmt.Println("Accept err ", err)
-				continue
+			if s.stopped.Load() {
+				return
 			}
-
-			//TODO Server.Start() 设置服务器最大连接控制,如果超过最大连接，那么则关闭此新的连接
-
-			//TODO Server.Start() 处理该新连接请求的 业务 方法， 此时应该有 handler 和 conn是绑定的
-			conntion := NewConntion(conn, cid, s.msgHandler)
-			//增加
-			cid++
-
-			//调用当前连接的开启方法
-			go conntion.Start()
+			fmt.Println("Accept err ", err)
+			continue
 		}
-	}()
+
+		if s.stopped.Load() {
+			conn.Close()
+			return
+		}
+
+		connection := NewConntion(conn, cid, s.msgHandler)
+		cid++
+		if err := s.connMgr.Add(connection); err != nil {
+			fmt.Println("Add connection error: ", err)
+			conn.Close()
+			continue
+		}
+
+		s.connWait.Add(1)
+		go s.startConnection(connection)
+	}
+}
+
+func (s *Server) startConnection(connection *Connection) {
+	defer s.connWait.Done()
+	if s.onConnStart != nil {
+		s.onConnStart(connection)
+	}
+
+	connection.Start()
+
+	if s.onConnStop != nil {
+		s.onConnStop(connection)
+	}
+	s.connMgr.Remove(connection.GetConnId())
+}
+
+func (s *Server) signalStop() {
+	s.stopOnce.Do(func() {
+		s.stopped.Store(true)
+		close(s.stopChan)
+		fmt.Println("[STOP] Zinx server , name ", s.Name)
+	})
 }
 
 func (s *Server) Stop() {
-	fmt.Println("[STOP] Zinx server , name ", s.Name)
+	s.signalStop()
 
-	//TODO  Server.Stop() 将其他需要清理的连接信息或者其他信息 也要一并停止或者清理
+	s.listenerLock.Lock()
+	listener := s.listener
+	s.listener = nil
+	s.listenerLock.Unlock()
+	if listener != nil {
+		listener.Close()
+	}
+
+	s.connMgr.ClearConn()
+	s.connWait.Wait()
+	s.msgHandler.StopWorkerPool()
 }
 
 func (s *Server) Serve() {
 	s.Start()
-
-	//TODO Server.Serve() 是否在启动服务的时候 还要处理其他的事情呢 可以在这里添加
-
-	//阻塞,否则主Go退出， listenner的go将会退出
-	for {
-		time.Sleep(10 * time.Second)
-	}
+	<-s.stopChan
 }
 
-/*
-创建一个服务器句柄
-*/
 func NewServer() gface.IServer {
-	//先初始化全局配置文件
 	utils.GlobalObject.Reload()
 
 	s := &Server{
-		Name:       utils.GlobalObject.Name, //从全局参数获取
+		Name:       utils.GlobalObject.Name,
 		IPVersion:  "tcp4",
-		IP:         utils.GlobalObject.Host,    //从全局参数获取
-		Port:       utils.GlobalObject.TcpPort, //从全局参数获取
-		msgHandler: NewMsgHandle(),             //创建MsgHandle
+		IP:         utils.GlobalObject.Host,
+		Port:       utils.GlobalObject.TcpPort,
+		msgHandler: NewMsgHandle(),
+		connMgr:    NewConnManager(),
+		stopChan:   make(chan struct{}),
 	}
 	return s
-
 }

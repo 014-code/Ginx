@@ -31,6 +31,7 @@ func TestConnectionUsesWorkerPool(t *testing.T) {
 	handler := gnet.NewMsgHandle()
 	handler.AddRouter(1, newReplyRouter(10, "move accepted"))
 	handler.StartWorkerPool()
+	t.Cleanup(handler.StopWorkerPool)
 
 	client, startDone := startTestConnection(t, handler)
 	writeTestMessage(t, client, 1, []byte("move"))
@@ -64,6 +65,7 @@ func TestConnectionClosesWhenWorkerQueueIsFull(t *testing.T) {
 	defer close(router.release)
 	handler.AddRouter(1, router)
 	handler.StartWorkerPool()
+	t.Cleanup(handler.StopWorkerPool)
 
 	client, startDone := startTestConnection(t, handler)
 	writeTestMessage(t, client, 1, []byte("running"))

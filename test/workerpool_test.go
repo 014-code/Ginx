@@ -34,12 +34,32 @@ func (r *blockingRouter) Handle(gface.IRequest) {
 
 func (r *blockingRouter) PostHandle(gface.IRequest) {}
 
+type drainingRouter struct {
+	firstStarted chan struct{}
+	release      chan struct{}
+	handled      chan string
+}
+
+func (r *drainingRouter) PreHandle(gface.IRequest) {}
+
+func (r *drainingRouter) Handle(request gface.IRequest) {
+	data := string(request.GetData())
+	if data == "first" {
+		r.firstStarted <- struct{}{}
+		<-r.release
+	}
+	r.handled <- data
+}
+
+func (r *drainingRouter) PostHandle(gface.IRequest) {}
+
 func TestWorkerPoolProcessesRequests(t *testing.T) {
 	setWorkerConfig(t, 2, 4)
 	handler := gnet.NewMsgHandle()
 	router := &workerRouter{requests: make(chan string, 1)}
 	handler.AddRouter(7, router)
 	handler.StartWorkerPool()
+	t.Cleanup(handler.StopWorkerPool)
 
 	if handler.WorkerPoolSize != 2 {
 		t.Fatalf("WorkerPoolSize = %d, want %d", handler.WorkerPoolSize, 2)
@@ -72,6 +92,7 @@ func TestWorkerPoolPreservesOrderForOneConnection(t *testing.T) {
 	router := &workerRouter{requests: make(chan string, 3)}
 	handler.AddRouter(7, router)
 	handler.StartWorkerPool()
+	t.Cleanup(handler.StopWorkerPool)
 
 	connection := &testConnection{id: 5}
 	for _, data := range []string{"first", "second", "third"} {
@@ -130,6 +151,7 @@ func TestWorkerPoolRejectsWhenQueueIsFull(t *testing.T) {
 	}
 	handler.AddRouter(7, router)
 	handler.StartWorkerPool()
+	t.Cleanup(handler.StopWorkerPool)
 
 	connection := &testConnection{id: 0}
 	if err := handler.SendMsgToTaskQueue(&testRequest{
@@ -165,4 +187,63 @@ func TestWorkerPoolRejectsWhenQueueIsFull(t *testing.T) {
 		t.Fatalf("SendMsgToTaskQueue() error = %q, want queue wait timeout", err)
 	}
 	close(router.release)
+}
+
+func TestWorkerPoolDrainsQueuedRequestsOnStop(t *testing.T) {
+	setWorkerConfig(t, 1, 2)
+	handler := gnet.NewMsgHandle()
+	router := &drainingRouter{
+		firstStarted: make(chan struct{}, 1),
+		release:      make(chan struct{}),
+		handled:      make(chan string, 2),
+	}
+	handler.AddRouter(7, router)
+	handler.StartWorkerPool()
+	t.Cleanup(handler.StopWorkerPool)
+
+	connection := &testConnection{id: 0}
+	for _, data := range []string{"first", "second"} {
+		if err := handler.SendMsgToTaskQueue(&testRequest{
+			connection: connection,
+			msgID:      7,
+			data:       []byte(data),
+		}); err != nil {
+			t.Fatalf("SendMsgToTaskQueue() error = %v", err)
+		}
+	}
+
+	select {
+	case <-router.firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the first request")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		handler.StopWorkerPool()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+		t.Fatal("StopWorkerPool() returned before the active task completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(router.release)
+	for _, want := range []string{"first", "second"} {
+		select {
+		case got := <-router.handled:
+			if got != want {
+				t.Fatalf("handled request = %q, want %q", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %q to drain", want)
+		}
+	}
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("StopWorkerPool() did not return after draining queued requests")
+	}
 }

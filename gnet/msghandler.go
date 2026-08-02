@@ -20,6 +20,8 @@ type MsgHandle struct {
 	TaskQueue         []chan gface.IRequest
 	workerPoolOnce    sync.Once
 	workerPoolStarted atomic.Bool
+	workerPoolWait    sync.WaitGroup
+	taskQueueLock     sync.RWMutex
 }
 
 func NewMsgHandle() *MsgHandle {
@@ -74,26 +76,59 @@ func (mh *MsgHandle) StartWorkerPool() {
 
 	mh.workerPoolOnce.Do(func() {
 		//遍历需要启动worker的数量，依此启动
+		mh.taskQueueLock.Lock()
 		for i := 0; i < int(mh.WorkerPoolSize); i++ {
 			//一个worker被启动
 			//给当前worker对应的任务队列开辟空间
 			mh.TaskQueue[i] = make(chan gface.IRequest, utils.GlobalObject.MaxWorkerTaskLen)
 		}
 
+		mh.workerPoolWait.Add(int(mh.WorkerPoolSize))
 		mh.workerPoolStarted.Store(true)
+		mh.taskQueueLock.Unlock()
 		for i := 0; i < int(mh.WorkerPoolSize); i++ {
 			//启动当前Worker，阻塞的等待对应的任务队列是否有消息传递进来
-			go mh.StartOneWorker(i, mh.TaskQueue[i])
+			go func(workerID int) {
+				defer mh.workerPoolWait.Done()
+				mh.StartOneWorker(workerID, mh.TaskQueue[workerID])
+			}(i)
 		}
 	})
 }
 
+func (mh *MsgHandle) StopWorkerPool() {
+	if !mh.workerPoolStarted.Load() {
+		return
+	}
+
+	mh.taskQueueLock.Lock()
+	if !mh.workerPoolStarted.Load() {
+		mh.taskQueueLock.Unlock()
+		return
+	}
+	for _, taskQueue := range mh.TaskQueue {
+		close(taskQueue)
+	}
+	mh.workerPoolStarted.Store(false)
+	mh.taskQueueLock.Unlock()
+
+	mh.workerPoolWait.Wait()
+}
+
 // 将消息交给TaskQueue,由worker进行处理
 func (mh *MsgHandle) SendMsgToTaskQueue(request gface.IRequest) error {
-	if mh.WorkerPoolSize == 0 || !mh.workerPoolStarted.Load() {
+	if mh.WorkerPoolSize == 0 {
 		go mh.DoMsgHandler(request)
 		return nil
 	}
+
+	mh.taskQueueLock.RLock()
+	if !mh.workerPoolStarted.Load() {
+		mh.taskQueueLock.RUnlock()
+		go mh.DoMsgHandler(request)
+		return nil
+	}
+	defer mh.taskQueueLock.RUnlock()
 
 	//根据ConnID来分配当前的连接应该由哪个worker负责处理
 	//轮询的平均分配法则

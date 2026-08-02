@@ -27,3 +27,6 @@ type IConnection interface {
 返回值：错误内容
 */
 type HandFunc func(*net.TCPConn, []byte, int) error
+
+// 连接生命周期回调方法
+type HookFunc func(connection IConnection)
