@@ -4,6 +4,7 @@ import (
 	"Ginx/gface"
 	"Ginx/gnet"
 	"Ginx/utils"
+	"net"
 	"testing"
 	"time"
 )
@@ -41,6 +42,73 @@ func TestConnectionUsesWorkerPool(t *testing.T) {
 	waitForConnectionStop(t, startDone)
 }
 
+func TestConnectionHandlesFragmentedPacket(t *testing.T) {
+	setWorkerConfig(t, 1, 4)
+	handler := gnet.NewMsgHandle()
+	router := newRecordingRouter(1)
+	handler.AddRouter(1, router)
+	handler.StartWorkerPool()
+	t.Cleanup(handler.StopWorkerPool)
+
+	client, startDone := startTestConnection(t, handler)
+	packet, err := gnet.NewDataPack().Pack(gnet.NewMsgPackage(1, []byte("fragmented")))
+	if err != nil {
+		t.Fatalf("Pack() error = %v", err)
+	}
+	for _, part := range packet {
+		if _, err := client.Write([]byte{part}); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+	}
+
+	select {
+	case data := <-router.requests:
+		if data != "fragmented" {
+			t.Fatalf("request data = %q, want fragmented", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for fragmented packet")
+	}
+	client.Close()
+	waitForConnectionStop(t, startDone)
+}
+
+func TestConnectionHandlesStickyPacketsInOrder(t *testing.T) {
+	setWorkerConfig(t, 1, 4)
+	handler := gnet.NewMsgHandle()
+	router := newRecordingRouter(2)
+	handler.AddRouter(1, router)
+	handler.StartWorkerPool()
+	t.Cleanup(handler.StopWorkerPool)
+
+	client, startDone := startTestConnection(t, handler)
+	pack := gnet.NewDataPack()
+	first, err := pack.Pack(gnet.NewMsgPackage(1, []byte("first")))
+	if err != nil {
+		t.Fatalf("Pack() first error = %v", err)
+	}
+	second, err := pack.Pack(gnet.NewMsgPackage(1, []byte("second")))
+	if err != nil {
+		t.Fatalf("Pack() second error = %v", err)
+	}
+	if _, err := client.Write(append(first, second...)); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	for _, want := range []string{"first", "second"} {
+		select {
+		case data := <-router.requests:
+			if data != want {
+				t.Fatalf("request data = %q, want %q", data, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %q packet", want)
+		}
+	}
+	client.Close()
+	waitForConnectionStop(t, startDone)
+}
+
 func TestConnectionFallsBackWithoutWorkerPool(t *testing.T) {
 	setWorkerConfig(t, 0, 4)
 	handler := gnet.NewMsgHandle()
@@ -52,6 +120,100 @@ func TestConnectionFallsBackWithoutWorkerPool(t *testing.T) {
 
 	client.Close()
 	waitForConnectionStop(t, startDone)
+}
+
+func TestConnectionSendsBufferedMessage(t *testing.T) {
+	setWorkerConfig(t, 0, 4)
+	setMessageBufferConfig(t, 2)
+	handler := gnet.NewMsgHandle()
+	client, connection, startDone := startTestConnectionWithConnection(t, handler)
+
+	if err := connection.SendBuffMsg(10, []byte("buffered reply")); err != nil {
+		t.Fatalf("SendBuffMsg() error = %v", err)
+	}
+	assertReply(t, client, 10, []byte("buffered reply"))
+
+	client.Close()
+	waitForConnectionStop(t, startDone)
+}
+
+func TestConnectionPreservesBufferedMessageOrder(t *testing.T) {
+	setWorkerConfig(t, 0, 4)
+	setMessageBufferConfig(t, 2)
+	handler := gnet.NewMsgHandle()
+	client, connection, startDone := startTestConnectionWithConnection(t, handler)
+
+	for _, data := range []string{"first buffered", "second buffered"} {
+		if err := connection.SendBuffMsg(10, []byte(data)); err != nil {
+			t.Fatalf("SendBuffMsg() error = %v", err)
+		}
+	}
+	assertReply(t, client, 10, []byte("first buffered"))
+	assertReply(t, client, 10, []byte("second buffered"))
+
+	client.Close()
+	waitForConnectionStop(t, startDone)
+}
+
+func TestConnectionBufferedMessageReturnsWhenQueueIsFull(t *testing.T) {
+	setMessageBufferConfig(t, 1)
+	client, server := newTCPPair(t)
+	connection := gnet.NewConntion(server, 42, gnet.NewMsgHandle())
+	defer client.Close()
+	defer server.Close()
+
+	if err := connection.SendBuffMsg(10, []byte("first")); err != nil {
+		t.Fatalf("SendBuffMsg() first error = %v", err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- connection.SendBuffMsg(10, []byte("second"))
+	}()
+
+	select {
+	case err := <-result:
+		if err == nil || err.Error() != "Connection outbound msg queue is full" {
+			t.Fatalf("SendBuffMsg() error = %v, want queue full error", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SendBuffMsg() blocked when the buffer queue was full")
+	}
+}
+
+func TestConnectionPreservesMixedOutboundMessageOrder(t *testing.T) {
+	setWorkerConfig(t, 0, 4)
+	setMessageBufferConfig(t, 4)
+	client, connection, startDone := startTestConnectionWithConnection(t, gnet.NewMsgHandle())
+
+	if err := connection.SendMsg(10, []byte("first")); err != nil {
+		t.Fatalf("SendMsg() error = %v", err)
+	}
+	if err := connection.SendBuffMsg(10, []byte("second")); err != nil {
+		t.Fatalf("SendBuffMsg() error = %v", err)
+	}
+	if err := connection.SendMsg(10, []byte("third")); err != nil {
+		t.Fatalf("SendMsg() second error = %v", err)
+	}
+
+	assertReply(t, client, 10, []byte("first"))
+	assertReply(t, client, 10, []byte("second"))
+	assertReply(t, client, 10, []byte("third"))
+	client.Close()
+	waitForConnectionStop(t, startDone)
+}
+
+func TestConnectionBufferedMessageRejectsAfterStop(t *testing.T) {
+	setMessageBufferConfig(t, 1)
+	client, server := newTCPPair(t)
+	connection := gnet.NewConntion(server, 42, gnet.NewMsgHandle())
+	defer client.Close()
+	defer server.Close()
+
+	connection.Stop()
+	if err := connection.SendBuffMsg(10, []byte("closed")); err == nil || err.Error() != "Connection closed when send buff msg" {
+		t.Fatalf("SendBuffMsg() after Stop() error = %v, want closed error", err)
+	}
 }
 
 func TestConnectionClosesWhenWorkerQueueIsFull(t *testing.T) {
@@ -146,4 +308,44 @@ func waitForConnectionStop(t *testing.T, startDone chan struct{}) {
 	case <-time.After(time.Second):
 		t.Fatal("connection did not stop after the client disconnected")
 	}
+}
+
+func startTestConnectionWithConnection(t *testing.T, handler *gnet.MsgHandle) (*net.TCPConn, *gnet.Connection, chan struct{}) {
+	t.Helper()
+	client, server := newTCPPair(t)
+	connection := gnet.NewConntion(server, 42, handler)
+	startDone := make(chan struct{})
+	go func() {
+		connection.Start()
+		close(startDone)
+	}()
+
+	t.Cleanup(func() {
+		client.Close()
+		select {
+		case <-startDone:
+		case <-time.After(time.Second):
+			connection.Stop()
+			select {
+			case <-startDone:
+			case <-time.After(time.Second):
+			}
+		}
+		server.Close()
+	})
+
+	return client, connection, startDone
+}
+
+type recordingRouter struct {
+	gnet.BaseRouter
+	requests chan string
+}
+
+func newRecordingRouter(size int) *recordingRouter {
+	return &recordingRouter{requests: make(chan string, size)}
+}
+
+func (r *recordingRouter) Handle(request gface.IRequest) {
+	r.requests <- string(request.GetData())
 }

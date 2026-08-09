@@ -1,5 +1,7 @@
 package gface
 
+import "Ginx/metrics"
+
 // 服务器接口
 type IServer interface {
 	//启动服务器方法
@@ -13,4 +15,5 @@ type IServer interface {
 	SetOnConnStart(hookFunc HookFunc)
 	SetOnConnStop(hookFunc HookFunc)
 	GetConnMgr() IConnManager
+	GetMetrics() metrics.Snapshot
 }

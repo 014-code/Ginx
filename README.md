@@ -1,5 +1,13 @@
 # Ginx
 
+## Runtime Services
+
+The framework also includes `session`, `limit`, `metrics`, and `persist` packages. See [Session And Room Guide](docs/session-room-guide.md) for login sessions, room messages, rate limiting, metrics, and player persistence.
+
+### 中文运行时服务
+
+框架同时提供 `session`、`limit`、`metrics` 和 `persist` 包。登录会话、房间协议、限流、指标以及玩家持久化的使用方式，请参阅 [会话与房间指南](docs/session-room-guide.md)。
+
 ## English
 
 Ginx is a lightweight Go game-server framework with length-prefixed messages, message-ID routing, per-connection read/write goroutines, configurable worker pools, buffered outbound messages, connection properties, connection lifecycle hooks, and graceful shutdown.
@@ -103,3 +111,6 @@ go build ./...
 消息协议、路由注册、并发注意事项和当前生产使用边界，请参阅[游戏服务端使用指南](docs/game-server-guide.md)。
 
 AOI、游戏房间、游戏协议和日志体系的使用方式，请参阅[游戏通用能力指南](docs/game-core-guide.md)。
+### 运行时服务
+
+框架同时提供 `session`、`limit`、`metrics` 和 `persist` 包。登录会话、房间协议、限流、指标以及玩家持久化的使用方式，请参阅 [会话与房间指南](docs/session-room-guide.md)。

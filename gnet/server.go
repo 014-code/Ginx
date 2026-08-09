@@ -2,6 +2,7 @@ package gnet
 
 import (
 	"Ginx/gface"
+	"Ginx/metrics"
 	"Ginx/utils"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ type Server struct {
 
 	onConnStart gface.HookFunc
 	onConnStop  gface.HookFunc
+	metrics     *metrics.Metrics
 }
 
 func (s *Server) AddRouter(msgId uint32, router gface.IRouter) {
@@ -45,6 +47,14 @@ func (s *Server) SetOnConnStop(hookFunc gface.HookFunc) {
 
 func (s *Server) GetConnMgr() gface.IConnManager {
 	return s.connMgr
+}
+
+// GetMetrics 返回当前服务运行指标快照。
+func (s *Server) GetMetrics() metrics.Snapshot {
+	if s == nil || s.metrics == nil {
+		return metrics.Snapshot{}
+	}
+	return s.metrics.Snapshot()
 }
 
 // 当前客户端连接的回调方法
@@ -117,12 +127,14 @@ func (s *Server) startAccept() {
 		}
 
 		connection := NewConntion(conn, cid, s.msgHandler)
+		connection.setMetrics(s.metrics)
 		cid++
 		if err := s.connMgr.Add(connection); err != nil {
 			fmt.Println("Add connection error: ", err)
 			conn.Close()
 			continue
 		}
+		s.metrics.AddConnections(1)
 
 		s.connWait.Add(1)
 		go s.startConnection(connection)
@@ -131,16 +143,18 @@ func (s *Server) startAccept() {
 
 func (s *Server) startConnection(connection *Connection) {
 	defer s.connWait.Done()
+	connection.startIO()
 	if s.onConnStart != nil {
 		s.onConnStart(connection)
 	}
 
-	connection.Start()
+	connection.wait()
 
 	if s.onConnStop != nil {
 		s.onConnStop(connection)
 	}
 	s.connMgr.Remove(connection.GetConnId())
+	s.metrics.AddConnections(-1)
 }
 
 func (s *Server) signalStop() {
@@ -174,15 +188,19 @@ func (s *Server) Serve() {
 
 func NewServer() gface.IServer {
 	utils.GlobalObject.Reload()
+	serverMetrics := &metrics.Metrics{}
+	messageHandler := NewMsgHandle()
+	messageHandler.SetMetrics(serverMetrics)
 
 	s := &Server{
 		Name:       utils.GlobalObject.Name,
 		IPVersion:  "tcp4",
 		IP:         utils.GlobalObject.Host,
 		Port:       utils.GlobalObject.TcpPort,
-		msgHandler: NewMsgHandle(),
+		msgHandler: messageHandler,
 		connMgr:    NewConnManager(),
 		stopChan:   make(chan struct{}),
+		metrics:    serverMetrics,
 	}
 	return s
 }

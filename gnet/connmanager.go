@@ -8,8 +8,10 @@ import (
 )
 
 type ConnManager struct {
+	//连接信息管理
 	connections map[uint32]gface.IConnection
-	connLock    sync.RWMutex
+	//读写锁
+	connLock sync.RWMutex
 }
 
 func NewConnManager() *ConnManager {
@@ -18,6 +20,7 @@ func NewConnManager() *ConnManager {
 	}
 }
 
+// 添加连接
 func (cm *ConnManager) Add(conn gface.IConnection) error {
 	if conn == nil {
 		return errors.New("connection is nil")
@@ -27,6 +30,7 @@ func (cm *ConnManager) Add(conn gface.IConnection) error {
 	defer cm.connLock.Unlock()
 
 	connID := conn.GetConnId()
+	//将连接添加到连接管理器中
 	if _, ok := cm.connections[connID]; ok {
 		return errors.New("connection id already exists")
 	}
@@ -38,12 +42,15 @@ func (cm *ConnManager) Add(conn gface.IConnection) error {
 	return nil
 }
 
+// 删除连接
 func (cm *ConnManager) Remove(connID uint32) {
 	cm.connLock.Lock()
+	//删除该连接
 	delete(cm.connections, connID)
 	cm.connLock.Unlock()
 }
 
+// 获取连接
 func (cm *ConnManager) Get(connID uint32) (gface.IConnection, error) {
 	cm.connLock.RLock()
 	conn, ok := cm.connections[connID]
@@ -54,6 +61,7 @@ func (cm *ConnManager) Get(connID uint32) (gface.IConnection, error) {
 	return conn, nil
 }
 
+// 获取当前连接数
 func (cm *ConnManager) Len() int {
 	cm.connLock.RLock()
 	length := len(cm.connections)
@@ -61,6 +69,7 @@ func (cm *ConnManager) Len() int {
 	return length
 }
 
+// 清除并停止所有连接
 func (cm *ConnManager) ClearConn() {
 	cm.connLock.Lock()
 	connections := make([]gface.IConnection, 0, len(cm.connections))

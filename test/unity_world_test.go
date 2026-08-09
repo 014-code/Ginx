@@ -1,8 +1,8 @@
 package test
 
 import (
-	"Ginx/gcore"
 	"Ginx/gface"
+	"Ginx/unity"
 	"testing"
 )
 
@@ -29,7 +29,7 @@ func (c *unityWorldTestConnection) SendBuffMsg(msgID uint32, data []byte) error 
 }
 
 func TestUnityWorldPlayerLifecycle(t *testing.T) {
-	world := gcore.NewUnityWorld()
+	world := unity.NewUnityWorld()
 	first := newUnityWorldTestConnection(10)
 	second := newUnityWorldTestConnection(20)
 
@@ -49,7 +49,7 @@ func TestUnityWorldPlayerLifecycle(t *testing.T) {
 		t.Fatalf("second player = %+v, old players = %+v", secondPlayer, oldPlayers)
 	}
 
-	position := gcore.UnityPosition{X: 5, Y: 6, Z: 7, V: 90}
+	position := unity.UnityPosition{X: 5, Y: 6, Z: 7, V: 90}
 	updated, err := world.UpdatePlayer(20, position, 3)
 	if err != nil {
 		t.Fatalf("UpdatePlayer() error = %v", err)
@@ -68,7 +68,7 @@ func TestUnityWorldPlayerLifecycle(t *testing.T) {
 }
 
 func TestUnityWorldBroadcastCanExcludeConnection(t *testing.T) {
-	world := gcore.NewUnityWorld()
+	world := unity.NewUnityWorld()
 	first := newUnityWorldTestConnection(0)
 	second := newUnityWorldTestConnection(1)
 	if _, _, err := world.AddPlayer(first); err != nil {
@@ -78,7 +78,7 @@ func TestUnityWorldBroadcastCanExcludeConnection(t *testing.T) {
 		t.Fatalf("AddPlayer() second error = %v", err)
 	}
 
-	if errorsFound := world.BroadcastExcept(first.GetConnId(), gcore.UnityMsgBroadCast, []byte("broadcast")); len(errorsFound) != 0 {
+	if errorsFound := world.BroadcastExcept(first.GetConnId(), unity.UnityMsgBroadCast, []byte("broadcast")); len(errorsFound) != 0 {
 		t.Fatalf("Broadcast() errors = %v", errorsFound)
 	}
 	select {
@@ -88,11 +88,46 @@ func TestUnityWorldBroadcastCanExcludeConnection(t *testing.T) {
 	}
 	select {
 	case message := <-second.messages:
-		if message.msgID != gcore.UnityMsgBroadCast || string(message.data) != "broadcast" {
+		if message.msgID != unity.UnityMsgBroadCast || string(message.data) != "broadcast" {
 			t.Fatalf("message = %+v", message)
 		}
 	default:
 		t.Fatal("Broadcast() did not send a message to the active connection")
+	}
+}
+
+func TestUnityWorldUsesAOIForNearbyPlayers(t *testing.T) {
+	world, err := unity.NewUnityWorldWithAOI(100, 100, 10, 10)
+	if err != nil {
+		t.Fatalf("NewUnityWorldWithAOI() error = %v", err)
+	}
+	first := newUnityWorldTestConnection(1)
+	second := newUnityWorldTestConnection(2)
+	third := newUnityWorldTestConnection(3)
+	if _, _, err := world.AddPlayer(first); err != nil {
+		t.Fatalf("AddPlayer() first error = %v", err)
+	}
+	if _, _, err := world.AddPlayer(second); err != nil {
+		t.Fatalf("AddPlayer() second error = %v", err)
+	}
+	if _, _, err := world.AddPlayer(third); err != nil {
+		t.Fatalf("AddPlayer() third error = %v", err)
+	}
+
+	result, err := world.UpdatePlayerWithVisibility(3, unity.UnityPosition{X: 90, Z: 90}, 0)
+	if err != nil {
+		t.Fatalf("UpdatePlayerWithVisibility() leave error = %v", err)
+	}
+	if len(result.Left) != 2 || len(result.Entered) != 0 || len(result.Visible) != 0 {
+		t.Fatalf("move away result = %+v", result)
+	}
+
+	result, err = world.UpdatePlayerWithVisibility(3, unity.UnityPosition{}, 0)
+	if err != nil {
+		t.Fatalf("UpdatePlayerWithVisibility() enter error = %v", err)
+	}
+	if len(result.Entered) != 2 || len(result.Left) != 0 || len(result.Visible) != 2 {
+		t.Fatalf("move back result = %+v", result)
 	}
 }
 

@@ -2,9 +2,11 @@ package gnet
 
 import (
 	"Ginx/gface"
+	"Ginx/metrics"
 	"Ginx/utils"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -22,6 +24,9 @@ type MsgHandle struct {
 	workerPoolStarted atomic.Bool
 	workerPoolWait    sync.WaitGroup
 	taskQueueLock     sync.RWMutex
+	panicHandlerLock  sync.RWMutex
+	panicHandler      func(gface.IRequest, interface{}, []byte)
+	metrics           *metrics.Metrics
 }
 
 func NewMsgHandle() *MsgHandle {
@@ -35,16 +40,47 @@ func NewMsgHandle() *MsgHandle {
 
 // 马上以非阻塞方式处理消息
 func (mh *MsgHandle) DoMsgHandler(request gface.IRequest) {
+	if request == nil {
+		return
+	}
 	handler, ok := mh.Apis[request.GetMsgID()]
 	if !ok {
 		fmt.Println("api msgId = ", request.GetMsgID(), " is not FOUND!")
 		return
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if mh.metrics != nil {
+				mh.metrics.IncRouterPanics()
+			}
+			mh.panicHandlerLock.RLock()
+			handlerFunc := mh.panicHandler
+			mh.panicHandlerLock.RUnlock()
+			if handlerFunc != nil {
+				handlerFunc(request, recovered, debug.Stack())
+				return
+			}
+			fmt.Println("router panic, msgId = ", request.GetMsgID(), ", panic = ", recovered)
+			fmt.Println(string(debug.Stack()))
+		}
+	}()
 
 	//执行对应处理方法
 	handler.PreHandle(request)
 	handler.Handle(request)
 	handler.PostHandle(request)
+}
+
+// SetMetrics 设置路由处理指标收集器。
+func (mh *MsgHandle) SetMetrics(value *metrics.Metrics) {
+	mh.metrics = value
+}
+
+// SetPanicHandler 设置路由 panic 回调，未设置时默认输出消息 ID 和堆栈。
+func (mh *MsgHandle) SetPanicHandler(handler func(gface.IRequest, interface{}, []byte)) {
+	mh.panicHandlerLock.Lock()
+	defer mh.panicHandlerLock.Unlock()
+	mh.panicHandler = handler
 }
 
 // 为消息添加具体的处理逻辑

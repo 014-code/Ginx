@@ -5,6 +5,7 @@ import (
 	"Ginx/utils"
 	"bytes"
 	"encoding/binary"
+	"io"
 	"testing"
 )
 
@@ -54,4 +55,83 @@ func TestDataPackRejectsOversizedMessage(t *testing.T) {
 	if _, err := gnet.NewDataPack().Unpack(header); err == nil {
 		t.Fatal("Unpack() accepted a packet larger than MaxPacketSize")
 	}
+}
+
+func TestDataPackReadMessageHandlesFragmentedAndStickyPackets(t *testing.T) {
+	pack := gnet.NewDataPack()
+	first, err := pack.Pack(gnet.NewMsgPackage(1, []byte("first")))
+	if err != nil {
+		t.Fatalf("Pack() first error = %v", err)
+	}
+	second, err := pack.Pack(gnet.NewMsgPackage(2, []byte("second")))
+	if err != nil {
+		t.Fatalf("Pack() second error = %v", err)
+	}
+
+	reader := &chunkReader{
+		data: append(first, second...),
+		step: 1,
+	}
+	firstMessage, err := pack.ReadMessage(reader)
+	if err != nil {
+		t.Fatalf("ReadMessage() first error = %v", err)
+	}
+	secondMessage, err := pack.ReadMessage(reader)
+	if err != nil {
+		t.Fatalf("ReadMessage() second error = %v", err)
+	}
+	if firstMessage.GetMsgID() != 1 || string(firstMessage.GetData()) != "first" {
+		t.Fatalf("first message = id:%d data:%q", firstMessage.GetMsgID(), firstMessage.GetData())
+	}
+	if secondMessage.GetMsgID() != 2 || string(secondMessage.GetData()) != "second" {
+		t.Fatalf("second message = id:%d data:%q", secondMessage.GetMsgID(), secondMessage.GetData())
+	}
+}
+
+func TestDataPackReadMessageHandlesZeroLengthPayload(t *testing.T) {
+	pack := gnet.NewDataPack()
+	data, err := pack.Pack(gnet.NewMsgPackage(99, nil))
+	if err != nil {
+		t.Fatalf("Pack() error = %v", err)
+	}
+
+	message, err := pack.ReadMessage(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("ReadMessage() error = %v", err)
+	}
+	if message.GetMsgID() != 99 || message.GetDataLen() != 0 || message.GetData() == nil {
+		t.Fatalf("message = id:%d len:%d data:%v", message.GetMsgID(), message.GetDataLen(), message.GetData())
+	}
+}
+
+func TestDataPackRejectsInvalidOutboundMessage(t *testing.T) {
+	pack := gnet.NewDataPack()
+	if _, err := pack.Pack(nil); err == nil {
+		t.Fatal("Pack() accepted a nil message")
+	}
+	if _, err := pack.Unpack(make([]byte, pack.GetHeadLen()+1)); err == nil {
+		t.Fatal("Unpack() accepted a header with an invalid length")
+	}
+}
+
+type chunkReader struct {
+	data []byte
+	step int
+	read int
+}
+
+func (r *chunkReader) Read(data []byte) (int, error) {
+	if r.read >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := r.step
+	if n > len(data) {
+		n = len(data)
+	}
+	if n > len(r.data)-r.read {
+		n = len(r.data) - r.read
+	}
+	copy(data[:n], r.data[r.read:r.read+n])
+	r.read += n
+	return n, nil
 }

@@ -1,4 +1,4 @@
-package gcore
+package unity
 
 import (
 	"encoding/binary"
@@ -15,6 +15,10 @@ const (
 	UnityMsgBroadCast   uint32 = 200
 	UnityMsgPlayerLeave uint32 = 201
 	UnityMsgSyncPlayers uint32 = 202
+	UnityMsgCreateRoom  uint32 = 203
+	UnityMsgJoinRoom    uint32 = 204
+	UnityMsgLeaveRoom   uint32 = 205
+	UnityMsgRoomEvent   uint32 = 206
 )
 
 // UnityPosition 对应 Unity 客户端中的 Pb.Position。
@@ -59,6 +63,26 @@ type UnityBroadCast struct {
 	Content    string
 	P          *UnityPosition
 	ActionData int32
+}
+
+// UnityRoomRequest 表示 Unity 客户端的房间操作请求。
+type UnityRoomRequest struct {
+	RoomID uint32
+}
+
+// UnityRoomResponse 表示 Unity 客户端的房间操作结果。
+type UnityRoomResponse struct {
+	RoomID      uint32
+	Code        int32
+	Message     string
+	PlayerCount uint32
+}
+
+// UnityRoomEvent 表示房间内的业务广播消息。
+type UnityRoomEvent struct {
+	RoomID   uint32
+	PlayerID int32
+	Content  string
 }
 
 func (p UnityPosition) Marshal() ([]byte, error) {
@@ -285,6 +309,97 @@ func (m *UnityBroadCast) Unmarshal(data []byte) error {
 	})
 }
 
+func (m UnityRoomRequest) Marshal() ([]byte, error) {
+	return appendVarint(nil, 1, uint64(m.RoomID)), nil
+}
+
+func (m *UnityRoomRequest) Unmarshal(data []byte) error {
+	if m == nil {
+		return errors.New("unity room request is nil")
+	}
+	return decodeUnityFields(data, func(fieldNum int, wireType int, value []byte, number uint64) error {
+		if fieldNum == 1 {
+			if wireType != 0 {
+				return errors.New("unity room request has invalid room id wire type")
+			}
+			m.RoomID = uint32(number)
+		}
+		return nil
+	})
+}
+
+func (m UnityRoomResponse) Marshal() ([]byte, error) {
+	data := appendVarint(nil, 1, uint64(m.RoomID))
+	data = appendVarint(data, 2, uint64(int64(m.Code)))
+	if m.Message != "" {
+		data = appendBytes(data, 3, []byte(m.Message))
+	}
+	data = appendVarint(data, 4, uint64(m.PlayerCount))
+	return data, nil
+}
+
+func (m *UnityRoomResponse) Unmarshal(data []byte) error {
+	if m == nil {
+		return errors.New("unity room response is nil")
+	}
+	return decodeUnityFields(data, func(fieldNum int, wireType int, value []byte, number uint64) error {
+		switch fieldNum {
+		case 1, 2, 4:
+			if wireType != 0 {
+				return fmt.Errorf("unity room response field %d has invalid wire type", fieldNum)
+			}
+			switch fieldNum {
+			case 1:
+				m.RoomID = uint32(number)
+			case 2:
+				m.Code = int32(number)
+			case 4:
+				m.PlayerCount = uint32(number)
+			}
+		case 3:
+			if wireType != 2 {
+				return errors.New("unity room response has invalid message wire type")
+			}
+			m.Message = string(value)
+		}
+		return nil
+	})
+}
+
+func (m UnityRoomEvent) Marshal() ([]byte, error) {
+	data := appendVarint(nil, 1, uint64(m.RoomID))
+	data = appendVarint(data, 2, uint64(int64(m.PlayerID)))
+	if m.Content != "" {
+		data = appendBytes(data, 3, []byte(m.Content))
+	}
+	return data, nil
+}
+
+func (m *UnityRoomEvent) Unmarshal(data []byte) error {
+	if m == nil {
+		return errors.New("unity room event is nil")
+	}
+	return decodeUnityFields(data, func(fieldNum int, wireType int, value []byte, number uint64) error {
+		switch fieldNum {
+		case 1, 2:
+			if wireType != 0 {
+				return fmt.Errorf("unity room event field %d has invalid wire type", fieldNum)
+			}
+			if fieldNum == 1 {
+				m.RoomID = uint32(number)
+			} else {
+				m.PlayerID = int32(number)
+			}
+		case 3:
+			if wireType != 2 {
+				return errors.New("unity room event has invalid content wire type")
+			}
+			m.Content = string(value)
+		}
+		return nil
+	})
+}
+
 func appendVarint(data []byte, fieldNum int, value uint64) []byte {
 	data = append(data, byte(fieldNum<<3))
 	for value >= 0x80 {
@@ -377,6 +492,9 @@ func readUnityVarint(data []byte, offset int) (uint64, int, error) {
 		}
 		current := data[offset]
 		offset++
+		if index == 9 && current > 1 {
+			return 0, offset, errors.New("unity protobuf varint overflows uint64")
+		}
 		value |= uint64(current&0x7f) << (7 * index)
 		if current < 0x80 {
 			return value, offset, nil

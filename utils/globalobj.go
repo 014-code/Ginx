@@ -18,11 +18,14 @@ type GlobalObj struct {
 	Version   string        //当前Zinx版本号
 
 	MaxPacketSize           uint32 //都需数据包的最大值
+	MaxMsgChanLen           uint32 //连接发送消息缓冲队列的最大长度
 	MaxConn                 int    //当前服务器主机允许的最大链接个数
 	WorkerPoolSize          uint32 //业务工作Worker池的数量
 	MaxWorkerTaskLen        uint32 //业务工作Worker对应负责的任务队列最大任务存储数量
 	WorkerTaskQueueWaitTime uint32 //Worker任务队列最大等待时间，单位毫秒
 	HeartbeatMax            int    //当前连接允许的最大心跳超时时间，单位秒
+	MessageRateLimit        int    //每条连接每秒允许处理的最大消息数，0表示关闭
+	MessageRateBurst        int    //每条连接允许的突发消息数，0表示使用MessageRateLimit
 
 	ConfFilePath string
 }
@@ -61,11 +64,14 @@ func init() {
 		Host:                    "0.0.0.0",
 		MaxConn:                 12000,
 		MaxPacketSize:           4096,
+		MaxMsgChanLen:           1024,
 		ConfFilePath:            "conf/ginx.json",
 		WorkerPoolSize:          10,
 		MaxWorkerTaskLen:        1024,
 		WorkerTaskQueueWaitTime: 100,
 		HeartbeatMax:            10,
+		MessageRateLimit:        0,
+		MessageRateBurst:        0,
 	}
 
 	//从配置文件中加载一些用户配置的参数

@@ -34,6 +34,18 @@ func (c *testConnection) SendMsg(uint32, []byte) error {
 	return nil
 }
 
+func (c *testConnection) SendBuffMsg(uint32, []byte) error {
+	return nil
+}
+
+func (c *testConnection) SetProperty(string, interface{}) {}
+
+func (c *testConnection) GetProperty(string) (interface{}, error) {
+	return nil, nil
+}
+
+func (c *testConnection) RemoveProperty(string) {}
+
 type managedTestConnection struct {
 	testConnection
 	stopped chan struct{}
@@ -81,6 +93,16 @@ func setWorkerConfig(t *testing.T, workerPoolSize uint32, maxWorkerTaskLen uint3
 
 	utils.GlobalObject.WorkerPoolSize = workerPoolSize
 	utils.GlobalObject.MaxWorkerTaskLen = maxWorkerTaskLen
+}
+
+func setMessageBufferConfig(t *testing.T, maxMsgChanLen uint32) {
+	t.Helper()
+	original := *utils.GlobalObject
+	t.Cleanup(func() {
+		*utils.GlobalObject = original
+	})
+
+	utils.GlobalObject.MaxMsgChanLen = maxMsgChanLen
 }
 
 func setServerConfig(t *testing.T, maxConn int) {

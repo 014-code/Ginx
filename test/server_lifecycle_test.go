@@ -43,6 +43,11 @@ func TestServerRunsLifecycleHooksAndStopsConnections(t *testing.T) {
 		t.Fatal("OnConnStart hook was not called")
 	}
 	waitForConnManagerLen(t, server, 1)
+	writeTestMessage(t, client, 99, []byte("metrics"))
+	waitForServerMessages(t, server, 1)
+	if snapshot := server.GetMetrics(); snapshot.Connections != 1 || snapshot.Messages < 1 || snapshot.BytesIn != 7 {
+		t.Fatalf("metrics while connected = %+v", snapshot)
+	}
 
 	server.Stop()
 
@@ -52,6 +57,9 @@ func TestServerRunsLifecycleHooksAndStopsConnections(t *testing.T) {
 		t.Fatal("OnConnStop hook was not called")
 	}
 	waitForConnManagerLen(t, server, 0)
+	if snapshot := server.GetMetrics(); snapshot.Connections != 0 {
+		t.Fatalf("metrics after stop = %+v", snapshot)
+	}
 
 	hookLock.Lock()
 	if len(started) != 1 || len(stopped) != 1 || started[0] != stopped[0] {
@@ -144,4 +152,16 @@ func waitForConnManagerLen(t *testing.T, server *gnet.Server, want int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("connection manager length = %d, want %d", server.GetConnMgr().Len(), want)
+}
+
+func waitForServerMessages(t *testing.T, server *gnet.Server, want uint64) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if server.GetMetrics().Messages >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("server messages = %d, want at least %d", server.GetMetrics().Messages, want)
 }

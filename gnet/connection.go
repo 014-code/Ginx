@@ -2,6 +2,8 @@ package gnet
 
 import (
 	"Ginx/gface"
+	"Ginx/limit"
+	"Ginx/metrics"
 	"Ginx/utils"
 	"errors"
 	"fmt"
@@ -26,6 +28,15 @@ type Connection struct {
 	ExitBuffChan chan bool
 	//无缓冲管道，用于读、写两个goroutine之间的消息通信
 	msgChan chan []byte
+	//有缓冲管道，用于临时缓存需要发送给客户端的消息
+	//保护有缓冲消息入队和连接关闭之间的并发关系
+	buffSendLock sync.Mutex
+	//连接属性集合
+	property map[string]interface{}
+	//保护连接属性的读写锁
+	propertyLock sync.RWMutex
+	metrics      *metrics.Metrics
+	requestLimit *limit.TokenBucket
 }
 
 // 创建连接的方法
@@ -35,7 +46,15 @@ func NewConntion(conn *net.TCPConn, connID uint32, msgHandler gface.IMsgHandle) 
 		ConnID:       connID,
 		MsgHandler:   msgHandler,
 		ExitBuffChan: make(chan bool, 1),
-		msgChan:      make(chan []byte), //msgChan初始化
+		msgChan:      make(chan []byte, utils.GlobalObject.MaxMsgChanLen),
+		property:     make(map[string]interface{}),
+	}
+	if utils.GlobalObject.MessageRateLimit > 0 {
+		burst := utils.GlobalObject.MessageRateBurst
+		if burst <= 0 {
+			burst = utils.GlobalObject.MessageRateLimit
+		}
+		c.requestLimit, _ = limit.NewTokenBucket(utils.GlobalObject.MessageRateLimit, burst)
 	}
 
 	return c
@@ -53,7 +72,7 @@ func (c *Connection) StartWriter() {
 		select {
 		case data := <-c.msgChan:
 			//有数据要写给客户端
-			if _, err := c.Conn.Write(data); err != nil {
+			if err := writeFull(c.Conn, data); err != nil {
 				fmt.Println("Send Data error:, ", err, " Conn Writer exit")
 				return
 			}
@@ -66,6 +85,9 @@ func (c *Connection) StartWriter() {
 
 // 直接将Message数据发送数据给远程的TCP客户端
 func (c *Connection) SendMsg(msgId uint32, data []byte) error {
+	c.buffSendLock.Lock()
+	defer c.buffSendLock.Unlock()
+
 	if c.isClosed.Load() {
 		return errors.New("Connection closed when send msg")
 	}
@@ -80,10 +102,66 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	//写回客户端
 	select {
 	case c.msgChan <- msg:
+		if c.metrics != nil {
+			c.metrics.AddBytesOut(uint64(len(msg)))
+		}
 		return nil
 	case <-c.ExitBuffChan:
 		return errors.New("Connection closed when send msg")
 	}
+}
+
+// 直接将Message数据发送数据给远程的TCP客户端(有缓冲)
+func (c *Connection) SendBuffMsg(msgId uint32, data []byte) error {
+	c.buffSendLock.Lock()
+	defer c.buffSendLock.Unlock()
+
+	if c.isClosed.Load() {
+		return errors.New("Connection closed when send buff msg")
+	}
+
+	//将data封包，并且发送
+	dp := NewDataPack()
+	msg, err := dp.Pack(NewMsgPackage(msgId, data))
+	if err != nil {
+		fmt.Println("Pack error msg id = ", msgId)
+		return errors.New("Pack error msg ")
+	}
+
+	//写回客户端，缓冲队列满时直接返回，避免业务协程永久阻塞
+	select {
+	case c.msgChan <- msg:
+		if c.metrics != nil {
+			c.metrics.AddBytesOut(uint64(len(msg)))
+		}
+		return nil
+	default:
+		return errors.New("Connection outbound msg queue is full")
+	}
+}
+
+// 设置连接属性
+func (c *Connection) SetProperty(key string, value interface{}) {
+	c.propertyLock.Lock()
+	defer c.propertyLock.Unlock()
+	c.property[key] = value
+}
+
+// 获取连接属性
+func (c *Connection) GetProperty(key string) (interface{}, error) {
+	c.propertyLock.RLock()
+	defer c.propertyLock.RUnlock()
+	if value, ok := c.property[key]; ok {
+		return value, nil
+	}
+	return nil, errors.New("property not found")
+}
+
+// 移除连接属性
+func (c *Connection) RemoveProperty(key string) {
+	c.propertyLock.Lock()
+	defer c.propertyLock.Unlock()
+	delete(c.property, key)
 }
 
 func (c *Connection) RemoteAddr() net.Addr {
@@ -107,38 +185,22 @@ func (c *Connection) StartReader() {
 			}
 		}
 
-		//创建连接对象拆包解包对象
-		pack := NewDataPack()
-
-		//读取msg的Head
-		headData := make([]byte, pack.GetHeadLen())
-
-		_, err := io.ReadFull(c.GetTCPConnection(), headData)
+		// DataPack 会完整读取消息头和消息体，同时处理 TCP 半包和粘包。
+		msg, err := NewDataPack().ReadMessage(c.GetTCPConnection())
 		if err != nil {
-			fmt.Println("Read Head Data error: ", err)
+			fmt.Println("Read Message error: ", err)
 			return
 		}
-		//拆包
-		msg, err := pack.Unpack(headData)
-		if err != nil {
-			fmt.Println("Unpack Head Data error: ", err)
+		if c.requestLimit != nil && !c.requestLimit.Allow() {
+			fmt.Println("Connection message rate limit exceeded, ConnID = ", c.ConnID)
 			return
 		}
-
-		//根据长度读取data
-		//构建一个和长度一样大小的缓冲区，长度头就是后续数据体的内容了
-		var data []byte
-		if msg.GetDataLen() > 0 {
-			data = make([]byte, msg.GetDataLen())
-			_, err := io.ReadFull(c.GetTCPConnection(), data)
-			if err != nil {
-				fmt.Println("Read Head Data error: ", err)
-				return
-			}
+		if c.metrics != nil {
+			c.metrics.IncMessages()
+			c.metrics.AddBytesIn(uint64(msg.GetDataLen()))
 		}
-		//set进去
-		msg.SetData(data)
-		//得到当前客户端的请求requster数据
+
+		// 得到当前客户端的请求数据。
 		req := Request{
 			conn: c,
 			data: msg,
@@ -156,13 +218,41 @@ func (c *Connection) StartReader() {
 	}
 }
 
-// 启动连接
+func (c *Connection) setMetrics(value *metrics.Metrics) {
+	c.metrics = value
+}
+
+// writeFull 保证一条已经封包的消息完整写入 TCP 连接。
+func writeFull(writer io.Writer, data []byte) error {
+	for len(data) > 0 {
+		written, err := writer.Write(data)
+		if err != nil {
+			return err
+		}
+		if written <= 0 {
+			return io.ErrShortWrite
+		}
+		data = data[written:]
+	}
+	return nil
+}
+
+// 启动连接。
 func (c *Connection) Start() {
+	c.startIO()
+	c.wait()
+}
+
+// 启动连接读写流程
+func (c *Connection) startIO() {
 	//1 开启用户从客户端读取数据流程的Goroutine
 	go c.StartReader()
 	//2 开启用于写回客户端数据流程的Goroutine
 	go c.StartWriter()
+}
 
+// 等待连接退出
+func (c *Connection) wait() {
 	for {
 		select {
 		case <-c.ExitBuffChan:

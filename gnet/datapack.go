@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
 )
 
 type DataPack struct {
@@ -17,6 +18,16 @@ func (d DataPack) GetHeadLen() uint32 {
 }
 
 func (d DataPack) Pack(msg gface.IMessage) ([]byte, error) {
+	if msg == nil {
+		return nil, errors.New("message is nil")
+	}
+	if msg.GetDataLen() != uint32(len(msg.GetData())) {
+		return nil, errors.New("message data length does not match payload")
+	}
+	if utils.GlobalObject.MaxPacketSize > 0 && msg.GetDataLen() > utils.GlobalObject.MaxPacketSize {
+		return nil, errors.New("too large msg data sent")
+	}
+
 	//创建缓冲区
 	buffer := bytes.NewBuffer([]byte{})
 
@@ -36,6 +47,10 @@ func (d DataPack) Pack(msg gface.IMessage) ([]byte, error) {
 }
 
 func (d DataPack) Unpack(bd []byte) (gface.IMessage, error) {
+	if uint32(len(bd)) != d.GetHeadLen() {
+		return nil, errors.New("invalid message header length")
+	}
+
 	//创建缓冲区
 	reader := bytes.NewReader(bd)
 
@@ -54,6 +69,35 @@ func (d DataPack) Unpack(bd []byte) (gface.IMessage, error) {
 	if utils.GlobalObject.MaxPacketSize > 0 && message.DataLen > utils.GlobalObject.MaxPacketSize {
 		return nil, errors.New("too large msg data received")
 	}
+	return message, nil
+}
+
+// ReadMessage 从 TCP 字节流中读取一条完整消息。
+// io.ReadFull 会处理半包，当前消息读取完成后，后续粘包数据会留在 reader 中。
+func (d DataPack) ReadMessage(reader io.Reader) (gface.IMessage, error) {
+	if reader == nil {
+		return nil, errors.New("message reader is nil")
+	}
+
+	header := make([]byte, d.GetHeadLen())
+	if _, err := io.ReadFull(reader, header); err != nil {
+		return nil, err
+	}
+
+	message, err := d.Unpack(header)
+	if err != nil {
+		return nil, err
+	}
+	if message.GetDataLen() == 0 {
+		message.SetData([]byte{})
+		return message, nil
+	}
+
+	data := make([]byte, message.GetDataLen())
+	if _, err := io.ReadFull(reader, data); err != nil {
+		return nil, err
+	}
+	message.SetData(data)
 	return message, nil
 }
 

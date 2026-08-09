@@ -14,7 +14,7 @@ func (this *PingRouter) Handle(request gface.IRequest) {
 	fmt.Println("Call PingRouter Handle")
 	fmt.Println("recv from client : msgId=", request.GetMsgID(), ", data=", string(request.GetData()))
 
-	if err := request.GetConnection().SendMsg(0, []byte("pong from tutorial server")); err != nil {
+	if err := request.GetConnection().SendBuffMsg(0, []byte("pong from tutorial server")); err != nil {
 		fmt.Println(err)
 	}
 }
@@ -27,7 +27,7 @@ func (this *HeartbeatRouter) Handle(request gface.IRequest) {
 	fmt.Println("Call HeartbeatRouter Handle")
 	fmt.Println("recv from client : msgId=", request.GetMsgID(), ", data=", string(request.GetData()))
 
-	if err := request.GetConnection().SendMsg(1, []byte("heartbeat accepted")); err != nil {
+	if err := request.GetConnection().SendBuffMsg(1, []byte("heartbeat accepted")); err != nil {
 		fmt.Println(err)
 	}
 }

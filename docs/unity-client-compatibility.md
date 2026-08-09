@@ -77,12 +77,14 @@ Unity 客户端和 Ginx 都使用小端序的 8 字节消息头：
 - `DataLen` 表示后续 Protobuf 消息体长度，不包含 8 字节消息头。
 - `MsgID` 用于选择 Ginx 路由和 Unity 客户端处理逻辑。
 - `Data` 使用客户端 `Assets/Scripts/Data/Msg.cs` 中定义的 Protobuf 格式。
-- Ginx 的 TCP 分帧由 `gnet.DataPack` 和 `Connection.StartReader()` 处理。
+- Ginx 的 TCP 分帧由 `gnet.DataPack.ReadMessage()` 处理：先使用 `io.ReadFull` 读取完整 8 字节头，再按 `DataLen` 读取完整消息体。
+- 一次 `Read` 只拿到半个消息时，`ReadMessage()` 会继续读取；一次 `Read` 收到多个消息时，当前调用只消费一条，后续消息留给下一次调用。
+- 服务端发送时使用完整写入循环，避免底层 `Write` 出现短写时截断一条消息。
 
 Go 端兼容协议位于：
 
 ```text
-gcore/unity_protocol.go
+unity/protocol.go
 ```
 
 ## 4. 消息 ID
@@ -213,8 +215,8 @@ MsgID 201 + SyncPid
 ## 9. 服务端代码位置
 
 ```text
-gcore/unity_protocol.go       Unity Protobuf 编解码
-gcore/unity_world.go          在线玩家状态和广播
+unity/protocol.go             Unity Protobuf 编解码
+unity/world.go                Unity 在线玩家状态和广播
 main/unityserver/Server.go    Unity MMO 路由及连接 Hook
 test/unity_protocol_test.go   协议单元测试
 test/unity_world_test.go      玩家世界单元测试
