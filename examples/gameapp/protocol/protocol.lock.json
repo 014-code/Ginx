@@ -1,0 +1,173 @@
+{
+  "generator": "Ginx protocolgen",
+  "schema": {
+    "schema_version": 1,
+    "protocol_version": 1,
+    "go_package": "protocol",
+    "csharp_namespace": "Ginx.Examples.GameApp",
+    "encoding": "json",
+    "messages": [
+      {
+        "name": "Authenticate",
+        "id": 1001,
+        "description": "TCP \u4f1a\u8bdd\u9274\u6743\uff1bToken \u7531\u73b0\u6709 HTTP \u767b\u5f55\u63a5\u53e3\u7b7e\u53d1\u3002",
+        "request": [
+          {
+            "name": "token",
+            "type": "string",
+            "optional": false,
+            "description": ""
+          }
+        ],
+        "response": [
+          {
+            "name": "code",
+            "type": "string",
+            "optional": false,
+            "description": ""
+          },
+          {
+            "name": "data",
+            "type": "json",
+            "optional": true,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "Heartbeat",
+        "id": 1002,
+        "description": "\u66f4\u65b0\u4f1a\u8bdd\u6d3b\u8dc3\u65f6\u95f4\uff0c\u4e0d\u5ef6\u957f Token \u7684\u7edd\u5bf9\u6709\u6548\u671f\u3002",
+        "request": [],
+        "response": [
+          {
+            "name": "code",
+            "type": "string",
+            "optional": false,
+            "description": ""
+          },
+          {
+            "name": "data",
+            "type": "json",
+            "optional": true,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "JoinRoom",
+        "id": 2001,
+        "description": "\u52a0\u5165\u5e94\u7528\u5b9a\u4e49\u7684\u623f\u95f4\u3002",
+        "request": [
+          {
+            "name": "room_id",
+            "type": "uint32",
+            "optional": false,
+            "description": ""
+          }
+        ],
+        "response": [
+          {
+            "name": "code",
+            "type": "string",
+            "optional": false,
+            "description": ""
+          },
+          {
+            "name": "data",
+            "type": "json",
+            "optional": true,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "LeaveRoom",
+        "id": 2002,
+        "description": "\u79bb\u5f00\u5f53\u524d\u623f\u95f4\u3002",
+        "request": [],
+        "response": [
+          {
+            "name": "code",
+            "type": "string",
+            "optional": false,
+            "description": ""
+          },
+          {
+            "name": "data",
+            "type": "json",
+            "optional": true,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "Progress",
+        "id": 3001,
+        "description": "\u67e5\u8be2\u5f53\u524d\u793a\u4f8b\u5b58\u6863\u3002",
+        "request": [],
+        "response": [
+          {
+            "name": "code",
+            "type": "string",
+            "optional": false,
+            "description": ""
+          },
+          {
+            "name": "data",
+            "type": "json",
+            "optional": true,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "StarterReward",
+        "id": 3002,
+        "description": "\u9886\u53d6\u4e00\u6b21\u6027\u5956\u52b1\uff1b\u53d1\u653e\u89c4\u5219\u4ecd\u7531 Go \u793a\u4f8b\u4e1a\u52a1\u5b9e\u73b0\u3002",
+        "request": [],
+        "response": [
+          {
+            "name": "code",
+            "type": "string",
+            "optional": false,
+            "description": ""
+          },
+          {
+            "name": "data",
+            "type": "json",
+            "optional": true,
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "UseItem",
+        "id": 3003,
+        "description": "\u6d88\u8017\u793a\u4f8b\u9053\u5177\uff1b\u5e93\u5b58\u548c\u4e8b\u52a1\u7531\u5e94\u7528\u8d1f\u8d23\u3002",
+        "request": [
+          {
+            "name": "item_id",
+            "type": "string",
+            "optional": false,
+            "description": ""
+          }
+        ],
+        "response": [
+          {
+            "name": "code",
+            "type": "string",
+            "optional": false,
+            "description": ""
+          },
+          {
+            "name": "data",
+            "type": "json",
+            "optional": true,
+            "description": ""
+          }
+        ]
+      }
+    ]
+  }
+}

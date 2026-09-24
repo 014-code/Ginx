@@ -1,6 +1,7 @@
 package gameapp
 
 import (
+	"Ginx/examples/gameapp/protocol"
 	"Ginx/gface"
 	"Ginx/gnet"
 	"bytes"
@@ -10,13 +11,14 @@ import (
 )
 
 const (
-	MsgAuthenticate  uint32 = 1001
-	MsgHeartbeat     uint32 = 1002
-	MsgJoinRoom      uint32 = 2001
-	MsgLeaveRoom     uint32 = 2002
-	MsgProgress      uint32 = 3001
-	MsgStarterReward uint32 = 3002
-	MsgUseItem       uint32 = 3003
+	// 保留原有公开名称；编号统一来自 schema 生成物。
+	MsgAuthenticate  = protocol.MsgAuthenticate
+	MsgHeartbeat     = protocol.MsgHeartbeat
+	MsgJoinRoom      = protocol.MsgJoinRoom
+	MsgLeaveRoom     = protocol.MsgLeaveRoom
+	MsgProgress      = protocol.MsgProgress
+	MsgStarterReward = protocol.MsgStarterReward
+	MsgUseItem       = protocol.MsgUseItem
 )
 
 type Reply struct {
@@ -46,9 +48,7 @@ func (r *tcpRouter) Handle(request gface.IRequest) {
 	var err error
 	switch request.GetMsgID() {
 	case MsgAuthenticate:
-		var body struct {
-			Token string `json:"token"`
-		}
+		var body protocol.AuthenticateRequest
 		if !decodeRequest(request.GetData(), &body) || body.Token == "" || len(body.Token) > 128 {
 			r.reply(request, Reply{Code: "invalid_request"})
 			return
@@ -57,18 +57,14 @@ func (r *tcpRouter) Handle(request gface.IRequest) {
 		playerID, err = r.service.Authenticate(id, body.Token)
 		result = map[string]uint64{"player_id": playerID}
 	case MsgJoinRoom:
-		var body struct {
-			RoomID uint32 `json:"room_id"`
-		}
+		var body protocol.JoinRoomRequest
 		if !decodeRequest(request.GetData(), &body) || body.RoomID == 0 {
 			r.reply(request, Reply{Code: "invalid_request"})
 			return
 		}
 		result, err = r.service.Join(id, body.RoomID)
 	case MsgUseItem:
-		var body struct {
-			ItemID string `json:"item_id"`
-		}
+		var body protocol.UseItemRequest
 		if !decodeRequest(request.GetData(), &body) || body.ItemID != "potion" {
 			r.reply(request, Reply{Code: "invalid_request"})
 			return

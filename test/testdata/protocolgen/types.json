@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "protocol_version": 4294967295,
+  "go_package": "protocol",
+  "csharp_namespace": "Ginx.Tests.Generated",
+  "encoding": "json",
+  "messages": [
+    {
+      "name": "AllTypes",
+      "id": 4294967295,
+      "request": [
+        {"name": "text", "type": "string"},
+        {"name": "enabled", "type": "bool", "optional": true},
+        {"name": "signed", "type": "int32"},
+        {"name": "unsigned", "type": "uint32"},
+        {"name": "large_signed", "type": "int64", "optional": true},
+        {"name": "large_unsigned", "type": "uint64"},
+        {"name": "decimal", "type": "float64"},
+        {"name": "raw_bytes", "type": "bytes", "optional": true},
+        {"name": "raw_json", "type": "json"},
+        {"name": "strings", "type": "[]string", "optional": true},
+        {"name": "booleans", "type": "[]bool"},
+        {"name": "signed_list", "type": "[]int32"},
+        {"name": "unsigned_list", "type": "[]uint32"},
+        {"name": "large_signed_list", "type": "[]int64"},
+        {"name": "large_unsigned_list", "type": "[]uint64", "optional": true},
+        {"name": "decimal_list", "type": "[]float64"},
+        {"name": "raw_byte_list", "type": "[]bytes"},
+        {"name": "raw_json_list", "type": "[]json", "optional": true},
+        {"name": "an_extremely_long_but_valid_identifier_for_format_alignment", "type": "string"}
+      ],
+      "response": []
+    }
+  ]
+}

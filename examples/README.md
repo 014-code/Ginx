@@ -7,6 +7,7 @@
 | --- | --- |
 | `gameserver` | 可运行的 HTTP + TCP 服务入口 |
 | `gameapp` | 共享会话、房间、HTTP/TCP 路由与成长规则 |
+| `gameapp/protocol` | 从 `schema/gameapp.json` 生成的 TCP 消息编号与请求/响应结构 |
 | `sqlitestore` | 纯 Go SQLite 驱动与事务存档适配器，不需要 C 编译器 |
 | `gameclient` | 登录、鉴权、入房、领奖、消耗、查询的命令行客户端 |
 | `gameprotocol` | 示例业务消息 ID，不扩展框架协议常量 |
@@ -15,6 +16,11 @@
 
 原 `gameapp/` 和 `main/gameserver` 已迁移至这里。Unity 推荐入口为 `go run ./examples/unityserver/cmd`，旧 `main/unityserver` 仅转发到同一实现；教程入口不变。框架、可选组件和兼容层的分工见 [框架与示例边界](../docs/framework-boundaries.md)。
 所有命令从仓库根目录运行。具体账号配置、端口和错误码参阅 [HTTP/TCP 指南](../docs/http-tcp-guide.md)。
+
+TCP JSON 消息定义统一在 `schema/gameapp.json`，修改后执行
+`python tools/protocolgen/generate.py`，提交前执行同一命令加 `--check`。
+旧 `gameapp.Msg*` 名称仍然可用，业务校验和响应 `Reply` 不变。生成器是独立通用工具，
+详见 [协议工具链](../docs/protocol-toolchain.md)。
 
 ## 启动与体验
 

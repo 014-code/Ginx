@@ -1,5 +1,19 @@
 # Ginx
 
+## 协议开发工具链
+
+`tools/protocolgen` 提供 Python 标准库实现的通用协议生成器：从 JSON 定义生成 Go
+消息常量/请求响应结构、Python/C# 常量、协议表和定义快照，并检查重复编号、字段类型、
+协议兼容性及生成物是否过期。它不进入服务端运行时，不需要 Redis 或 Python 后端服务。
+
+```powershell
+python tools/protocolgen/generate.py
+python tools/protocolgen/generate.py --check
+```
+
+需要 Python 3.10+；生成物随源码保存，正常编译/运行 Go 服务不需要 Python。
+定义格式、自定义输出和 Docker 命令见 [协议工具链](docs/protocol-toolchain.md)。
+
 ## HTTP + TCP game server
 
 The application under `examples/` demonstrates Gin HTTP login, TCP authentication, rooms and SQLite-backed progression. These business rules are not framework APIs.

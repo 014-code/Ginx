@@ -216,6 +216,12 @@ Hook 应迅速返回，不能等待客户端回复；入站处理在 Hook 返回
 
 ## 验证
 
+TCP JSON 消息定义已集中到 `schema/gameapp.json`。编号及请求结构来自
+`examples/gameapp/protocol/`，既有消息 ID、JSON 字段、8 字节 TCP 头及 `gameapp.Msg*`
+公开名称保持不变。消息表见生成的 [协议参考](../examples/gameapp/protocol/protocol.md)，
+维护方式见 [Python 协议工具链](protocol-toolchain.md)。提交前运行
+`python tools/protocolgen/generate.py --check` 检查定义与生成物一致。
+
 `test/gameapp_test.go` 覆盖真实 HTTP 登录 → TCP 鉴权 → 入房 → HTTP 查询一致性、离房、断线、
 重复登录、容量限制、过期、存储重启和联合停服；`session_token_test.go` 覆盖连接 ID 0、
 并发绑定、Token 替换与过期；`server_hook_order_test.go` 验证欢迎消息与初始化时序。

@@ -1,3 +1,5 @@
 .idea/
 config/accounts.local.json
 data/
+__pycache__/
+*.py[cod]

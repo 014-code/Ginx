@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "protocol_version": 1,
+  "encoding": "json",
+  "go_package": "protocol",
+  "csharp_namespace": "Ginx.Examples.GameApp",
+  "messages": [
+    {
+      "name": "Authenticate",
+      "id": 1001,
+      "description": "TCP 会话鉴权；Token 由现有 HTTP 登录接口签发。",
+      "request": [{"name": "token", "type": "string"}],
+      "response": [{"name": "code", "type": "string"}, {"name": "data", "type": "json", "optional": true}]
+    },
+    {
+      "name": "Heartbeat",
+      "id": 1002,
+      "description": "更新会话活跃时间，不延长 Token 的绝对有效期。",
+      "request": [],
+      "response": [{"name": "code", "type": "string"}, {"name": "data", "type": "json", "optional": true}]
+    },
+    {
+      "name": "JoinRoom",
+      "id": 2001,
+      "description": "加入应用定义的房间。",
+      "request": [{"name": "room_id", "type": "uint32"}],
+      "response": [{"name": "code", "type": "string"}, {"name": "data", "type": "json", "optional": true}]
+    },
+    {
+      "name": "LeaveRoom",
+      "id": 2002,
+      "description": "离开当前房间。",
+      "request": [],
+      "response": [{"name": "code", "type": "string"}, {"name": "data", "type": "json", "optional": true}]
+    },
+    {
+      "name": "Progress",
+      "id": 3001,
+      "description": "查询当前示例存档。",
+      "request": [],
+      "response": [{"name": "code", "type": "string"}, {"name": "data", "type": "json", "optional": true}]
+    },
+    {
+      "name": "StarterReward",
+      "id": 3002,
+      "description": "领取一次性奖励；发放规则仍由 Go 示例业务实现。",
+      "request": [],
+      "response": [{"name": "code", "type": "string"}, {"name": "data", "type": "json", "optional": true}]
+    },
+    {
+      "name": "UseItem",
+      "id": 3003,
+      "description": "消耗示例道具；库存和事务由应用负责。",
+      "request": [{"name": "item_id", "type": "string"}],
+      "response": [{"name": "code", "type": "string"}, {"name": "data", "type": "json", "optional": true}]
+    }
+  ]
+}

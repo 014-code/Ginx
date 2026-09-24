@@ -30,6 +30,8 @@ Ginx 是一个面向游戏服务端的 Go TCP 框架，当前已经具备以下�
 | `main/` | 可运行的服务端、客户端和教程示例。 |
 | `test/` | 所有框架测试，新增测试统一放在这里。 |
 | `docs/` | 游戏服务端使用说明和教程文档。 |
+| `tools/protocolgen/` | Python 标准库协议生成、定义校验和兼容性检查，构建期使用。 |
+| `schema/` | 应用协议定义，消息 ID 和业务字段不属于框架 API。 |
 
 ## 核心架构
 
@@ -197,6 +199,17 @@ test(worker): cover queue shutdown
 ```
 
 任何涉及协议、并发、连接生命周期或公开接口的改动，都必须同步补充 `test/` 测试和 `docs/` 说明。
+
+## 协议生成工具
+
+`tools/protocolgen/generate.py` 要求 Python 3.10+，无第三方依赖。默认读取
+`schema/gameapp.json` 并输出 `examples/gameapp/protocol/`；自定义定义必须明确 `--out`。
+修改定义后运行生成器，再运行 `python tools/protocolgen/generate.py --check` 和
+`python -m unittest discover -s test -p 'test_*.py' -v`。Python 测试也放在 `test/`。
+不要手改生成代码、协议表或 lock；兼容性比较使用独立的已发布定义，通过 `--baseline` 指定。
+不要把工具、Python 运行时或生成的业务定义引入 `gnet`/`gface`/`gcore`。完整约定见
+`docs/protocol-toolchain.md`。
+
 ## Runtime Service Modules
 
 The optional `session/` package owns account, token, player, and connection mappings. Applications supply player IDs to `Issue` and explicitly choose `RejectExisting` (default) or `ReplaceExisting` through `session.New(Options)`. Automatic IDs only remain in deprecated `NewManager` / `Login` compatibility code. The `limit/` package provides token buckets, `metrics/` provides atomic runtime snapshots, and optional `persist/` provides a player-shaped storage interface plus memory and JSON implementations. The transport does not require session or player storage. Keep application policy in `examples/` or downstream applications.
