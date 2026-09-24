@@ -1,4 +1,3 @@
-// 旧命令兼容入口；Unity 业务实现位于 examples/unityserver。
 package main
 
 import "Ginx/examples/unityserver"

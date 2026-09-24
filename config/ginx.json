@@ -9,5 +9,7 @@
   "WorkerTaskQueueWaitTime":100,
   "HeartbeatMax":10,
   "MessageRateLimit":0,
-  "MessageRateBurst":0
+  "MessageRateBurst":0,
+  "WriteTimeout":0,
+  "SendTimeout":0
 }

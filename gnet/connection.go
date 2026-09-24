@@ -4,7 +4,7 @@ import (
 	"Ginx/gface"
 	"Ginx/limit"
 	"Ginx/metrics"
-	"Ginx/utils"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -22,39 +22,52 @@ type Connection struct {
 	//当前连接的关闭状态
 	isClosed atomic.Bool
 	stopOnce sync.Once
+	ioWait   sync.WaitGroup
 	//消息管理MsgId和对应处理方法的消息管理模块
 	MsgHandler gface.IMsgHandle
 	//告知该链接已经退出/停止的channel
 	ExitBuffChan chan bool
-	//无缓冲管道，用于读、写两个goroutine之间的消息通信
+	//统一出站队列，容量由 MaxMsgChanLen 决定。
 	msgChan chan []byte
-	//有缓冲管道，用于临时缓存需要发送给客户端的消息
-	//保护有缓冲消息入队和连接关闭之间的并发关系
-	buffSendLock sync.Mutex
+	// 发送串行化使用可取消信号量，非阻塞发送不等待其他发送者。
+	sendGate chan struct{}
+	ctx      context.Context
+	cancel   context.CancelFunc
 	//连接属性集合
 	property map[string]interface{}
 	//保护连接属性的读写锁
 	propertyLock sync.RWMutex
 	metrics      *metrics.Metrics
 	requestLimit *limit.TokenBucket
+	config       *Config
+	dataPack     *DataPack
 }
 
 // 创建连接的方法
 func NewConntion(conn *net.TCPConn, connID uint32, msgHandler gface.IMsgHandle) *Connection {
+	return newConnection(conn, connID, msgHandler, nil)
+}
+
+func newConnection(conn *net.TCPConn, connID uint32, msgHandler gface.IMsgHandle, config *Config) *Connection {
+	settings := effectiveConfig(config)
+	ctx, cancel := context.WithCancel(context.Background())
 	c := &Connection{
+		ctx: ctx, cancel: cancel, sendGate: make(chan struct{}, 1),
+		config:       config,
+		dataPack:     &DataPack{config: config},
 		Conn:         conn,
 		ConnID:       connID,
 		MsgHandler:   msgHandler,
 		ExitBuffChan: make(chan bool, 1),
-		msgChan:      make(chan []byte, utils.GlobalObject.MaxMsgChanLen),
+		msgChan:      make(chan []byte, settings.MaxMsgChanLen),
 		property:     make(map[string]interface{}),
 	}
-	if utils.GlobalObject.MessageRateLimit > 0 {
-		burst := utils.GlobalObject.MessageRateBurst
+	if settings.MessageRateLimit > 0 {
+		burst := settings.MessageRateBurst
 		if burst <= 0 {
-			burst = utils.GlobalObject.MessageRateLimit
+			burst = settings.MessageRateLimit
 		}
-		c.requestLimit, _ = limit.NewTokenBucket(utils.GlobalObject.MessageRateLimit, burst)
+		c.requestLimit, _ = limit.NewTokenBucket(settings.MessageRateLimit, burst)
 	}
 
 	return c
@@ -64,6 +77,7 @@ func NewConntion(conn *net.TCPConn, connID uint32, msgHandler gface.IMsgHandle) 
 写消息Goroutine， 用户将数据发送给客户端
 */
 func (c *Connection) StartWriter() {
+	defer c.Stop()
 
 	fmt.Println("[Writer Goroutine is running]")
 	defer fmt.Println(c.RemoteAddr().String(), "[conn Writer exit!]")
@@ -71,6 +85,14 @@ func (c *Connection) StartWriter() {
 	for {
 		select {
 		case data := <-c.msgChan:
+			if c.isClosed.Load() {
+				return
+			}
+			if timeout := effectiveConfig(c.config).WriteTimeout; timeout > 0 {
+				if err := c.Conn.SetWriteDeadline(time.Now().Add(time.Duration(timeout) * time.Millisecond)); err != nil {
+					return
+				}
+			}
 			//有数据要写给客户端
 			if err := writeFull(c.Conn, data); err != nil {
 				fmt.Println("Send Data error:, ", err, " Conn Writer exit")
@@ -85,60 +107,82 @@ func (c *Connection) StartWriter() {
 
 // 直接将Message数据发送数据给远程的TCP客户端
 func (c *Connection) SendMsg(msgId uint32, data []byte) error {
-	c.buffSendLock.Lock()
-	defer c.buffSendLock.Unlock()
-
-	if c.isClosed.Load() {
-		return errors.New("Connection closed when send msg")
+	ctx := context.Background()
+	if timeout := effectiveConfig(c.config).SendTimeout; timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
+		defer cancel()
 	}
-	//将data封包，并且发送
-	dp := NewDataPack()
-	msg, err := dp.Pack(NewMsgPackage(msgId, data))
-	if err != nil {
-		fmt.Println("Pack error msg id = ", msgId)
-		return errors.New("Pack error msg ")
-	}
-
-	//写回客户端
-	select {
-	case c.msgChan <- msg:
-		if c.metrics != nil {
-			c.metrics.AddBytesOut(uint64(len(msg)))
-		}
-		return nil
-	case <-c.ExitBuffChan:
-		return errors.New("Connection closed when send msg")
-	}
+	return c.SendMsgContext(ctx, msgId, data)
 }
 
-// 直接将Message数据发送数据给远程的TCP客户端(有缓冲)
+// SendMsgContext 等待入队，可取消；成功不代表消息已写入或被对端接收。
+func (c *Connection) SendMsgContext(ctx context.Context, msgId uint32, data []byte) error {
+	return c.send(ctx, msgId, data, false)
+}
+
+// SendBuffMsg 不等待发送者或队列，竞争时返回 ErrSendQueueFull。
 func (c *Connection) SendBuffMsg(msgId uint32, data []byte) error {
-	c.buffSendLock.Lock()
-	defer c.buffSendLock.Unlock()
-
-	if c.isClosed.Load() {
-		return errors.New("Connection closed when send buff msg")
-	}
-
-	//将data封包，并且发送
-	dp := NewDataPack()
-	msg, err := dp.Pack(NewMsgPackage(msgId, data))
-	if err != nil {
-		fmt.Println("Pack error msg id = ", msgId)
-		return errors.New("Pack error msg ")
-	}
-
-	//写回客户端，缓冲队列满时直接返回，避免业务协程永久阻塞
-	select {
-	case c.msgChan <- msg:
-		if c.metrics != nil {
-			c.metrics.AddBytesOut(uint64(len(msg)))
-		}
-		return nil
-	default:
-		return errors.New("Connection outbound msg queue is full")
-	}
+	return c.send(context.Background(), msgId, data, true)
 }
+
+func (c *Connection) send(ctx context.Context, msgId uint32, data []byte, nonblocking bool) error {
+	if c.isClosed.Load() {
+		return ErrConnectionClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if nonblocking {
+		select {
+		case c.sendGate <- struct{}{}:
+		default:
+			return ErrSendQueueFull
+		}
+	} else {
+		select {
+		case c.sendGate <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.ctx.Done():
+			return ErrConnectionClosed
+		}
+	}
+	defer func() { <-c.sendGate }()
+	if c.isClosed.Load() {
+		return ErrConnectionClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	msg, err := c.dataPack.Pack(NewMsgPackage(msgId, data))
+	if err != nil {
+		return fmt.Errorf("pack message: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if nonblocking {
+		select {
+		case c.msgChan <- msg:
+		default:
+			return ErrSendQueueFull
+		}
+	} else {
+		select {
+		case c.msgChan <- msg:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.ctx.Done():
+			return ErrConnectionClosed
+		}
+	}
+	c.metrics.AddBytesOut(uint64(len(msg)))
+	return nil
+}
+
+// Context 在连接关闭时取消，路由可将它传入支持取消的操作。
+func (c *Connection) Context() context.Context { return c.ctx }
 
 // 设置连接属性
 func (c *Connection) SetProperty(key string, value interface{}) {
@@ -177,8 +221,9 @@ func (c *Connection) StartReader() {
 	defer c.Stop()
 	//循环读
 	for {
-		if utils.GlobalObject.HeartbeatMax > 0 {
-			deadline := time.Now().Add(time.Duration(utils.GlobalObject.HeartbeatMax) * time.Second)
+		settings := effectiveConfig(c.config)
+		if settings.HeartbeatMax > 0 {
+			deadline := time.Now().Add(time.Duration(settings.HeartbeatMax) * time.Second)
 			if err := c.GetTCPConnection().SetReadDeadline(deadline); err != nil {
 				fmt.Println("Set read deadline error: ", err)
 				return
@@ -186,7 +231,7 @@ func (c *Connection) StartReader() {
 		}
 
 		// DataPack 会完整读取消息头和消息体，同时处理 TCP 半包和粘包。
-		msg, err := NewDataPack().ReadMessage(c.GetTCPConnection())
+		msg, err := c.dataPack.ReadMessage(c.GetTCPConnection())
 		if err != nil {
 			fmt.Println("Read Message error: ", err)
 			return
@@ -207,13 +252,9 @@ func (c *Connection) StartReader() {
 		}
 
 		//从绑定好的消息和对应的处理方法中执行对应的Handle方法
-		if utils.GlobalObject.WorkerPoolSize > 0 {
-			if err := c.MsgHandler.SendMsgToTaskQueue(&req); err != nil {
-				fmt.Println("Send request to worker queue error: ", err)
-				return
-			}
-		} else {
-			go c.MsgHandler.DoMsgHandler(&req)
+		if err := c.MsgHandler.SendMsgToTaskQueue(&req); err != nil {
+			fmt.Println("Send request to worker queue error: ", err)
+			return
 		}
 	}
 }
@@ -246,26 +287,38 @@ func (c *Connection) Start() {
 // 启动连接读写流程
 func (c *Connection) startIO() {
 	//1 开启用户从客户端读取数据流程的Goroutine
-	go c.StartReader()
+	c.startReader()
 	//2 开启用于写回客户端数据流程的Goroutine
-	go c.StartWriter()
+	c.startWriter()
+}
+
+func (c *Connection) startReader() {
+	c.ioWait.Add(1)
+	go func() {
+		defer c.ioWait.Done()
+		c.StartReader()
+	}()
+}
+
+func (c *Connection) startWriter() {
+	c.ioWait.Add(1)
+	go func() {
+		defer c.ioWait.Done()
+		c.StartWriter()
+	}()
 }
 
 // 等待连接退出
 func (c *Connection) wait() {
-	for {
-		select {
-		case <-c.ExitBuffChan:
-			//得到退出消息就走
-			return
-		}
-	}
+	<-c.ExitBuffChan
+	c.ioWait.Wait()
 }
 
 // 停止连接
 func (c *Connection) Stop() {
 	c.stopOnce.Do(func() {
 		c.isClosed.Store(true)
+		c.cancel()
 		// 关闭socket链接
 		c.Conn.Close()
 

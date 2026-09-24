@@ -3,11 +3,11 @@ package utils
 import (
 	"encoding/json"
 	"io/ioutil"
+	"os"
 )
 
 /*
-存储一切有关Zinx框架的全局参数，供其他模块使用
-一些参数也可以通过 用户根据 zinx.json来配置
+保存 Ginx 服务配置，可显式从 ginx.json 加载。
 */
 type GlobalObj struct {
 	Host    string //当前服务器主机IP
@@ -21,6 +21,8 @@ type GlobalObj struct {
 	MaxWorkerTaskLen        uint32 //业务工作Worker对应负责的任务队列最大任务存储数量
 	WorkerTaskQueueWaitTime uint32 //Worker任务队列最大等待时间，单位毫秒
 	HeartbeatMax            int    //当前连接允许的最大心跳超时时间，单位秒
+	WriteTimeout            uint32 //单包 socket 写入超时，毫秒；0 不限制
+	SendTimeout             uint32 //SendMsg 等待发送锁和入队的总超时，毫秒；0 不限制
 	MessageRateLimit        int    //每条连接每秒允许处理的最大消息数，0表示关闭
 	MessageRateBurst        int    //每条连接允许的突发消息数，0表示使用MessageRateLimit
 }
@@ -28,7 +30,19 @@ type GlobalObj struct {
 /*
 定义一个全局的对象
 */
-var GlobalObject *GlobalObj
+// GlobalObject 仅供旧 API 使用；包导入时不再隐式读取磁盘。
+var GlobalObject = func() *GlobalObj { config := DefaultConfig(); return &config }()
+
+// LoadConfig 显式读取指定文件，在默认值上覆盖字段，不修改全局状态。
+func LoadConfig(path string) (GlobalObj, error) {
+	config := DefaultConfig()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return config, err
+	}
+	err = json.Unmarshal(data, &config)
+	return config, err
+}
 
 // 读取用户的配置文件
 func (g *GlobalObj) Reload() {
@@ -47,12 +61,9 @@ func (g *GlobalObj) Reload() {
 	}
 }
 
-/*
-提供init方法，默认加载
-*/
-func init() {
-	//初始化GlobalObject变量，设置一些默认值
-	GlobalObject = &GlobalObj{
+// DefaultConfig 返回独立的默认配置，不读取文件。
+func DefaultConfig() GlobalObj {
+	return GlobalObj{
 		Name:                    "ZinxServerApp",
 		TcpPort:                 7777,
 		Host:                    "0.0.0.0",
@@ -66,7 +77,4 @@ func init() {
 		MessageRateLimit:        0,
 		MessageRateBurst:        0,
 	}
-
-	//从配置文件中加载一些用户配置的参数
-	GlobalObject.Reload()
 }

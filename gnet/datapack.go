@@ -2,7 +2,6 @@ package gnet
 
 import (
 	"Ginx/gface"
-	"Ginx/utils"
 	"bytes"
 	"encoding/binary"
 	"errors"
@@ -10,6 +9,7 @@ import (
 )
 
 type DataPack struct {
+	config *Config
 }
 
 func (d DataPack) GetHeadLen() uint32 {
@@ -24,7 +24,8 @@ func (d DataPack) Pack(msg gface.IMessage) ([]byte, error) {
 	if msg.GetDataLen() != uint32(len(msg.GetData())) {
 		return nil, errors.New("message data length does not match payload")
 	}
-	if utils.GlobalObject.MaxPacketSize > 0 && msg.GetDataLen() > utils.GlobalObject.MaxPacketSize {
+	maxPacketSize := effectiveConfig(d.config).MaxPacketSize
+	if maxPacketSize > 0 && msg.GetDataLen() > maxPacketSize {
 		return nil, errors.New("too large msg data sent")
 	}
 
@@ -66,7 +67,8 @@ func (d DataPack) Unpack(bd []byte) (gface.IMessage, error) {
 	}
 
 	//判断数据包的长度是否超出我们允许的最大包长度
-	if utils.GlobalObject.MaxPacketSize > 0 && message.DataLen > utils.GlobalObject.MaxPacketSize {
+	maxPacketSize := effectiveConfig(d.config).MaxPacketSize
+	if maxPacketSize > 0 && message.DataLen > maxPacketSize {
 		return nil, errors.New("too large msg data received")
 	}
 	return message, nil
@@ -103,4 +105,9 @@ func (d DataPack) ReadMessage(reader io.Reader) (gface.IMessage, error) {
 
 func NewDataPack() *DataPack {
 	return &DataPack{}
+}
+
+// NewDataPackWithLimit 为独立客户端/编解码器设置包长限制，0 表示不限。
+func NewDataPackWithLimit(maxPacketSize uint32) *DataPack {
+	return &DataPack{config: &Config{MaxPacketSize: maxPacketSize}}
 }

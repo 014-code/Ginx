@@ -32,7 +32,7 @@ Build Settings 中的场景顺序为：
 在 Ginx 项目根目录执行：
 
 ```powershell
-go run ./main/unityserver
+go run ./examples/unityserver/cmd
 ```
 
 服务端读取 `config/ginx.json`，默认监听：
@@ -84,7 +84,7 @@ Unity 客户端和 Ginx 都使用小端序的 8 字节消息头：
 Go 端兼容协议位于：
 
 ```text
-unity/protocol.go
+examples/unity/protocol.go
 ```
 
 ## 4. 消息 ID
@@ -215,12 +215,14 @@ MsgID 201 + SyncPid
 ## 9. 服务端代码位置
 
 ```text
-unity/protocol.go             Unity Protobuf 编解码
-unity/world.go                Unity 在线玩家状态和广播
-main/unityserver/Server.go    Unity MMO 路由及连接 Hook
+examples/unity/protocol.go             Unity Protobuf 编解码
+examples/unity/world.go                Unity 在线玩家状态和广播
+examples/unityserver/server.go    Unity MMO 路由及连接 Hook
 test/unity_protocol_test.go   协议单元测试
 test/unity_world_test.go      玩家世界单元测试
 ```
+
+旧 `Ginx/unity` 兼容包已移除，调用方需改为 `Ginx/examples/unity`。`main/unityserver` 仍可运行，业务实现统一位于 `examples/`。项目可直接引用示例或复制到自己的业务包。
 
 ## 10. 验证命令
 
@@ -234,9 +236,9 @@ go build ./...
 
 ## 11. 当前限制
 
-### 全量广播
+### AOI 广播边界
 
-当前 `UnityWorld.Broadcast()` 会向全部在线玩家广播聊天和移动消息，还没有根据 AOI 过滤视野。玩家数量增加后，应使用 `gcore.AOIManager` 查询附近玩家，再只向进入视野范围的连接发送消息。
+Unity 示例使用 `BroadcastVisible` 向附近玩家广播聊天、移动和加入消息，并在移动时同步进入/离开视野的玩家。视野基于 `gcore.AOIManager` 的九宫格，精确距离和具体可见性规则仍需由应用决定。
 
 ### 状态只保存在内存
 
@@ -255,7 +257,7 @@ go build ./...
 确认启动的是：
 
 ```powershell
-go run ./main/unityserver
+go run ./examples/unityserver/cmd
 ```
 
 同时检查 Unity Console 是否成功收到消息 ID `1`、`202` 和 `200`。

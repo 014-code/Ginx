@@ -1,12 +1,31 @@
 # Ginx
 
+## HTTP + TCP game server
+
+The application under `examples/` demonstrates Gin HTTP login, TCP authentication, rooms and SQLite-backed progression. These business rules are not framework APIs.
+See [HTTP/TCP guide](docs/http-tcp-guide.md) for account setup, Docker commands and the protocol.
+
+新增 Gin 联合入口：HTTP 登录获取 Token，再通过 TCP 鉴权和加入房间。
+完整示例位于 `examples/`：SQLite 事务存档、一次性新手奖励、等级和背包消耗。
+这些规则只属于示例，不进入 `gnet`、`gcore` 或框架存储接口。
+账号配置、启动命令、接口协议及验证方式见 [HTTP 与 TCP 联合入口](docs/http-tcp-guide.md)。
+
+Windows 一键启动：先开启 Docker Desktop（Linux 容器），再双击根目录的
+`start-server.cmd`（需要 PowerShell 7）。无需本机安装 Go；首次引导创建账号，
+随后自动构建并后台启动 HTTP/TCP 服务。命令行可运行 `./start-server.ps1`，
+停止服务执行 `docker stop ginx-game`。默认仅监听本机，详细参数见上述指南。
+
+框架核心只负责传输、连接和路由；Unity 世界、消息 ID、账号和成长规则位于 `examples/`。
+新服务使用 `gnet.NewServerWithConfig`，由应用显式加载配置。Unity 使用 `Ginx/examples/unity`，旧 `Ginx/unity` 导入路径已移除；旧启动命令仍可用。
+包职责、接口迁移和兼容范围见 [框架与示例边界](docs/framework-boundaries.md)。
+
 ## Runtime Services
 
-The framework also includes `session`, `limit`, `metrics`, and `persist` packages. See [Session And Room Guide](docs/session-room-guide.md) for login sessions, room messages, rate limiting, metrics, and player persistence.
+The transport uses `limit` and `metrics`; `session`, `persist` and `gcore` are optional reusable components. See [Session And Room Guide](docs/session-room-guide.md) for login sessions, room messages, rate limiting, metrics, and player persistence.
 
 ### 中文运行时服务
 
-框架同时提供 `session`、`limit`、`metrics` 和 `persist` 包。登录会话、房间协议、限流、指标以及玩家持久化的使用方式，请参阅 [会话与房间指南](docs/session-room-guide.md)。
+`limit`、`metrics` 提供限流和指标；`session`、`persist`、`gcore` 是按需组合的可选组件。登录会话、房间协议、限流、指标以及玩家持久化的使用方式，请参阅 [会话与房间指南](docs/session-room-guide.md)。
 
 ## English
 
@@ -28,7 +47,7 @@ Run the server and client in separate terminals. The client sends a ping and a h
 The repository contains a backend compatible with the legacy Unity MMO demo protocol. Start it from the repository root:
 
 ```powershell
-go run ./main/unityserver
+go run ./examples/unityserver/cmd
 ```
 
 Open `Assets/Scene/Login.unity` in the Unity `5.4.1f1` client project, then connect to `127.0.0.1:7777`. The Unity server supports player-ID assignment, existing-player synchronization, join/leave broadcasts, chat, and movement messages.
@@ -67,7 +86,7 @@ go run ./main/tutorial/client
 项目提供了兼容旧版 Unity MMO 示例客户端协议的服务端。在项目根目录执行：
 
 ```powershell
-go run ./main/unityserver
+go run ./examples/unityserver/cmd
 ```
 
 使用 Unity `5.4.1f1` 打开客户端项目中的 `Assets/Scene/Login.unity`，然后连接 `127.0.0.1:7777`。Unity 兼容服务端支持玩家 ID 分配、已有玩家同步、玩家加入和离线广播、聊天及移动消息。
@@ -87,4 +106,4 @@ go build ./...
 AOI、游戏房间、游戏协议和日志体系的使用方式，请参阅[游戏通用能力指南](docs/game-core-guide.md)。
 ### 运行时服务
 
-框架同时提供 `session`、`limit`、`metrics` 和 `persist` 包。登录会话、房间协议、限流、指标以及玩家持久化的使用方式，请参阅 [会话与房间指南](docs/session-room-guide.md)。
+`limit`、`metrics` 提供限流和指标；`session`、`persist`、`gcore` 是按需组合的可选组件。登录会话、房间协议、限流、指标以及玩家持久化的使用方式，请参阅 [会话与房间指南](docs/session-room-guide.md)。

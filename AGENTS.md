@@ -23,9 +23,9 @@ Ginx 是一个面向游戏服务端的 Go TCP 框架，当前已经具备以下�
 | --- | --- |
 | `gface/` | 对外接口定义，例如 `IConnection`、`IServer`、`IConnManager`、`IRouter`。 |
 | `gnet/` | 框架核心实现，包括 `Server`、`Connection`、`ConnManager`、`MsgHandle`、协议封包。 |
-| `gcore/` | 游戏通用能力，包括 AOI、房间、游戏协议和结构化日志。 |
-| `unity/` | Unity 客户端专用协议、消息编解码和在线玩家适配，不属于框架核心。 |
-| `utils/` | 全局配置对象和配置文件加载逻辑。 |
+| `gcore/` | 可选游戏通用能力：AOI、房间、消息信封和结构化日志，不制定玩法。 |
+| `examples/` | HTTP/TCP 与 Unity 示例、业务消息 ID、成长规则及 SQLite 适配器，不属于框架 API。 |
+| `utils/` | 默认配置、显式文件加载和旧全局配置兼容，不在导入时读取磁盘。 |
 | `config/` | 默认运行配置，文件名为 `ginx.json`。 |
 | `main/` | 可运行的服务端、客户端和教程示例。 |
 | `test/` | 所有框架测试，新增测试统一放在这里。 |
@@ -44,8 +44,10 @@ Server.Start()
     -> NewConntion()
     -> ConnManager.Add(connection)
     -> startConnection()
+        -> startWriter()
         -> OnConnStart
-        -> connection.Start()
+        -> startReader()
+        -> wait()
         -> OnConnStop
         -> ConnManager.Remove(connection.GetConnId())
 ```
@@ -82,7 +84,7 @@ connection.RemoveProperty("PlayerID")
 
 属性表由连接内部的读写锁保护，`SetProperty` 会覆盖同名值，`GetProperty` 找不到值时返回错误，`RemoveProperty` 删除不存在的键不会报错。读取 `interface{}` 属性时必须检查类型断言，不要假设属性一定存在或类型一定正确。属性只服务于当前连接的短期会话数据，不能替代玩家持久化、数据库连接或全局服务容器。
 
-Server 的 `OnConnStart` 会在连接读写协程启动后调用，因此 Hook 中可以安全执行欢迎消息发送和属性初始化；`OnConnStop` 适合读取属性并清理业务状态。
+Server 会先启动写协程，再执行 `OnConnStart`，最后启动读协程。Hook 中可以发送欢迎消息并初始化属性，不能等待客户端回复；`OnConnStop` 适合读取属性并清理业务状态。
 
 ### gcore 游戏能力模块
 
@@ -90,7 +92,7 @@ Server 的 `OnConnStart` 会在连接读写协程启动后调用，因此 Hook �
 
 - `AOIManager` 只维护实体坐标、网格和邻近实体，不直接操作连接。
 - `Room` 和 `RoomManager` 负责成员、容量、状态和广播，不负责玩家登录和游戏帧循环。
-- `GameMessage` 负责 DataPack 之上的版本、序列号、玩家、房间和业务消息类型。
+- `GameMessage` 是 DataPack 之上的可选消息信封；具体业务消息 ID 由应用定义，参考 `examples/gameprotocol`。`gcore` 同名旧常量只保留兼容，不再扩展。
 - `Logger` 输出 JSON 行日志，不负责文件轮转、远程传输和日志采集。
 
 新增游戏业务时优先组合这些模块，不要把房间状态、AOI 网格或日志文件逻辑塞回 `gnet.Connection`。
@@ -157,7 +159,9 @@ go test -race -count=1 ./...
 
 ## 配置注意事项
 
-`gnet.NewServer()` 会调用 `utils.GlobalObject.Reload()`，从当前工作目录或父级目录加载 `config/ginx.json`。运行服务和执行依赖配置路径的测试时，应从项目根目录执行命令。
+新代码使用 `gnet.NewServerWithConfig(config)`，配置由 `gnet.DefaultConfig()` 或 `utils.LoadConfig(path)` 显式提供。服务持有独立快照，向连接、Worker、连接管理器和封包器传递；包导入和新构造函数不读取文件。文件加载失败必须由应用处理。
+
+旧 `gnet.NewServer()` 仍调用 `utils.GlobalObject.Reload()`，从当前目录或父目录加载 `config/ginx.json`，仅供兼容。不要把旧全局 API 用于多实例或运行时并发改配置。示例默认相对路径，应从项目根目录运行。完整迁移说明见 `docs/framework-boundaries.md`。
 
 主要配置字段：
 
@@ -171,6 +175,10 @@ go test -race -count=1 ./...
 | `MaxWorkerTaskLen` | 每个 Worker 队列容量。 |
 | `WorkerTaskQueueWaitTime` | 队列满时的等待毫秒数。 |
 | `HeartbeatMax` | 连接读超时时间，`0` 表示关闭心跳超时。 |
+| `WriteTimeout` | 单包 socket 写入超时，单位毫秒，`0` 表示不限制。 |
+| `SendTimeout` | `SendMsg` 等待发送者和队列的超时，单位毫秒，`0` 表示不限制。 |
+
+`SendMsgContext` 和 `Shutdown(ctx)` 通过可选接口 `gface.ContextConnection`、`gface.ShutdownServer` 暴露，旧接口实现无需新增方法。`gface.RequestContext(request)` 在连接关闭时取消；路由需要将它传入可取消操作。`Shutdown` 超时仅结束等待，清理继续；`Stop()` 无限等待同一清理流程。不要在路由或连接 Hook 中同步等待本服务停服。
 
 ## Agent 工作流程
 
@@ -191,6 +199,6 @@ test(worker): cover queue shutdown
 任何涉及协议、并发、连接生命周期或公开接口的改动，都必须同步补充 `test/` 测试和 `docs/` 说明。
 ## Runtime Service Modules
 
-The `session/` package owns account, token, player, and connection mappings. The `limit/` package provides token buckets, `metrics/` provides atomic runtime snapshots, and `persist/` provides the `PlayerStore` boundary plus memory and JSON implementations. Keep these concerns outside `gcore` and `gnet` business rules.
+The optional `session/` package owns account, token, player, and connection mappings. Applications supply player IDs to `Issue` and explicitly choose `RejectExisting` (default) or `ReplaceExisting` through `session.New(Options)`. Automatic IDs only remain in deprecated `NewManager` / `Login` compatibility code. The `limit/` package provides token buckets, `metrics/` provides atomic runtime snapshots, and optional `persist/` provides a player-shaped storage interface plus memory and JSON implementations. The transport does not require session or player storage. Keep application policy in `examples/` or downstream applications.
 
 `MessageRateLimit` and `MessageRateBurst` are optional per-connection inbound limits. Both are disabled when the rate is zero. `gnet.Server.GetMetrics()` exposes connection, message, byte, and recovered-router-panic counters.

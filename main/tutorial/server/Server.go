@@ -3,6 +3,7 @@ package main
 import (
 	"Ginx/gface"
 	"Ginx/gnet"
+	"Ginx/utils"
 	"fmt"
 )
 
@@ -33,7 +34,11 @@ func (this *HeartbeatRouter) Handle(request gface.IRequest) {
 }
 
 func main() {
-	server := gnet.NewServer()
+	config, err := utils.LoadConfig("config/ginx.json")
+	if err != nil {
+		panic(err)
+	}
+	server := gnet.NewServerWithConfig(config)
 	server.SetOnConnStart(func(connection gface.IConnection) {
 		fmt.Println("client connected:", connection.GetConnId())
 	})

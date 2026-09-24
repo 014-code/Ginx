@@ -1,4 +1,5 @@
-// Package persist 提供玩家状态持久化接口和基础实现。
+// Package persist 是可选的玩家存档组件，不属于网络核心。
+// 其 Player 模型仅适用于采用此存档约定的应用；gnet 不依赖该接口。
 package persist
 
 import (

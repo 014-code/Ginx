@@ -1,13 +1,14 @@
 package test
 
 import (
+	"Ginx/examples/gameprotocol"
 	"Ginx/gcore"
 	"encoding/binary"
 	"testing"
 )
 
 func TestGameMessageEncodeAndDecode(t *testing.T) {
-	message := gcore.NewGameMessage(gcore.GameMsgPlayerMove, 8, 1001, 2001, []byte("move payload"))
+	message := gcore.NewGameMessage(gameprotocol.GameMsgPlayerMove, 8, 1001, 2001, []byte("move payload"))
 	message.Flags = gcore.GameMessageFlagReliable | gcore.GameMessageFlagResponse
 
 	data, err := message.Encode()
@@ -31,7 +32,7 @@ func TestGameMessageRejectsInvalidData(t *testing.T) {
 		t.Fatal("DecodeGameMessage() accepted an incomplete header")
 	}
 
-	message := gcore.NewGameMessage(gcore.GameMsgLoginRequest, 1, 2, 3, []byte("login"))
+	message := gcore.NewGameMessage(gameprotocol.GameMsgLoginRequest, 1, 2, 3, []byte("login"))
 	data, err := message.Encode()
 	if err != nil {
 		t.Fatalf("Encode() error = %v", err)

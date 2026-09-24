@@ -20,6 +20,8 @@
 
 ## 启动服务
 
+需要 HTTP 登录和 TCP 鉴权时，使用独立的 `examples/gameserver` 示例入口，参见 [HTTP 与 TCP 联合入口](http-tcp-guide.md)。
+
 从项目根目录启动示例服务：
 
 ```powershell
@@ -40,8 +42,12 @@ go run ./main/tutorial/server
 | `MaxWorkerTaskLen` | 每个 Worker 任务队列的最大容量 |
 | `WorkerTaskQueueWaitTime` | 任务队列满时的最大等待时间，单位毫秒 |
 | `HeartbeatMax` | 连接最大空闲时间，单位秒，设置为 `0` 时关闭 |
+| `WriteTimeout` | 单个数据包写入 socket 的超时时间，单位毫秒，设置为 `0` 时不限制 |
+| `SendTimeout` | `SendMsg` 等待发送串行化和出站队列的超时时间，单位毫秒，设置为 `0` 时不限制 |
 
-如果配置文件不可用，框架会保留代码中的默认值。部署时建议把配置文件和服务启动目录固定下来，并显式填写 `MaxPacketSize`。
+示例使用 `utils.LoadConfig("config/ginx.json")` 显式加载配置，文件缺失或格式错误时启动失败；未填写的字段沿用默认值。应用把返回值交给 `gnet.NewServerWithConfig`，每个服务独立持有配置快照。无需配置文件时可以直接传入 `gnet.DefaultConfig()`。
+
+旧 `gnet.NewServer()` 仍保留搜索当前目录/父目录配置并修改全局对象的行为，文件不可读时保留原值，仅供兼容。包导入不再读取文件。迁移说明见 [框架与示例边界](framework-boundaries.md)。
 
 ## 注册游戏消息
 
@@ -63,7 +69,11 @@ func (r *LoginRouter) Handle(request gface.IRequest) {
 }
 
 func main() {
-    server := gnet.NewServer()
+    config, err := utils.LoadConfig("config/ginx.json")
+    if err != nil {
+        panic(err)
+    }
+    server := gnet.NewServerWithConfig(config)
     server.SetOnConnStart(func(connection gface.IConnection) {
         fmt.Println("player connected:", connection.GetConnId())
     })
@@ -104,7 +114,37 @@ if err == nil {
 
 当 `MaxConn > 0` 时，达到上限后的新 TCP 连接会立即关闭；`MaxConn <= 0` 表示不限制连接数。应用关闭时调用 `server.Stop()`：监听器先关闭，现有连接随后关闭，已经进入 Worker 队列的任务会被处理完成后退出。
 
-`SendMsg` 和 `SendBuffMsg` 共享每条连接的出站队列，并由同一个写协程顺序写出。`SendMsg` 在队列满时等待，适合关键消息；`SendBuffMsg` 队列满时立即返回错误，适合广播和实时状态。两个方法混用时，已经成功入队的消息仍按入队顺序发送；多个业务协程同时调用时，需要由业务层决定调用顺序。连接停止时尚未写出的消息会被丢弃，关键数据不应只依赖内存中的发送队列。
+`SendMsg` 和 `SendBuffMsg` 共享每条连接的出站队列，并由同一个写协程顺序写出。`SendMsg` 在队列满时等待，适合关键消息；`SendBuffMsg` 在队列满或其他发送者占用发送入口时立即返回 `ErrSendQueueFull`，适合广播和实时状态。两个方法混用时，已经成功入队的消息仍按入队顺序发送；多个业务协程同时调用时，需要由业务层决定调用顺序。连接停止时尚未写出的消息会被丢弃，关键数据不应只依赖内存中的发送队列。
+
+### 超时与取消
+
+两个新超时字段默认均为 `0`，保持原有不设超时的行为。应用可按负载配置，例如 `SendTimeout: 500`、`WriteTimeout: 5000`（毫秒）。`WriteTimeout` 为一整个数据包的写入期限，写失败或超时关闭连接；它不表示对端已处理消息。
+
+需要单次发送期限时，使用可选接口，不用修改既有 `IConnection` 实现：
+
+```go
+connection, ok := request.GetConnection().(gface.ContextConnection)
+if !ok {
+    return // 自定义旧连接需自行提供取消发送能力
+}
+ctx, cancel := context.WithTimeout(gface.RequestContext(request), 200*time.Millisecond)
+defer cancel()
+err := connection.SendMsgContext(ctx, 4001, payload)
+```
+
+`SendMsgContext` 使用传入的上下文，不叠加 `SendTimeout`。等待发送入口和入队均可取消；编码本身不是可抢占操作。通过 `errors.Is` 判断 `context.Canceled`、`context.DeadlineExceeded`、`gnet.ErrConnectionClosed` 或 `gnet.ErrSendQueueFull`，不要依赖错误字符串。成功仅表示入队；若取消/关闭与入队同时发生，调用可能成功，之后也可能丢弃消息，取消不会撤回已入队消息。
+
+主程序收到退出信号后可限时等待：
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+err := server.Shutdown(ctx) // server 为 *gnet.Server
+```
+
+`Shutdown` 发起停止接入、关闭连接并取消请求上下文，等待 Hook、网络协程及路由完成。已入队路由继续调用，但其连接上下文可能已取消；数据库等业务操作应使用 `gface.RequestContext(request)`，避免停服后继续等待外部服务。零 Worker 模式的已接受任务也会被等待。Worker 停止后提交返回 `ErrWorkerStopped`，不再启动临时协程。
+
+重复或并发调用等待同一清理流程；超时返回不等于清理完成，可再次调用等待完成。业务不配合取消时无法强行结束该协程，也不应在清理完成前关闭它仍会使用的数据库。`Stop()` 等价于无期限等待。停服操作应由应用生命周期管理协程调用，不能在正在执行的路由或连接 Hook 内同步等待自己结束。
 
 游戏项目建议给消息 ID 建立集中定义，例如：
 
@@ -157,11 +197,14 @@ N bytes  data
 - 同一连接的消息进入同一个 Worker 队列，因此同一连接内保持入队顺序；不同连接可以并行处理。
 - 当 `WorkerPoolSize = 0` 时，每条入站消息回退为临时协程处理。
 - `SendBuffMsg` 的队列容量由 `MaxMsgChanLen` 控制，队列满时业务应记录错误、丢弃低优先级消息或交给业务层重试队列。
+- `SendMsgContext` 支持业务传入取消上下文；连接关闭时请求上下文会自动取消。发送成功只表示消息进入连接出站队列。
+- `WriteTimeout` 防止慢客户端长期占用写协程；超时会关闭连接。`SendTimeout` 防止发送调用无限等待队列或其他发送者。
 - 当任务队列在 `WorkerTaskQueueWaitTime` 内仍然没有空间时，当前连接会被关闭，避免读协程永久阻塞。
 - 需要顺序一致性的业务应在业务层增加玩家锁、串行队列或状态机。
 - 路由中不要直接操作另一个连接的底层 socket；跨玩家推送应通过连接管理器统一调度。
 - 连接会在 `HeartbeatMax` 时间内没有收到完整消息时自动关闭；客户端可以通过心跳消息刷新连接活跃时间。
 - 调用 `Server.Stop()` 后不再接收新连接；连接关闭钩子可用于持久化玩家状态或回收房间资源。
+- `Server.Shutdown(ctx)` 支持带期限停服。超时只结束调用方等待，后台清理会继续；业务路由需要使用 `gface.RequestContext` 配合可取消的数据库或外部调用。
 - 断线清理、登录态校验、重连恢复和消息幂等需要由游戏业务层实现。
 
 ## 测试和提交前检查

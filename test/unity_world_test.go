@@ -1,8 +1,8 @@
 package test
 
 import (
+	"Ginx/examples/unity"
 	"Ginx/gface"
-	"Ginx/unity"
 	"testing"
 )
 

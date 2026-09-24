@@ -47,11 +47,11 @@ for _, broadcastError := range broadcastErrors {
 
 ## 游戏协议
 
-Ginx 原有 `DataPack` 负责 TCP 分帧，`gcore.GameMessage` 负责游戏业务上下文：协议版本、标志、消息类型、序列号、玩家 ID、房间 ID 和消息体。
+`DataPack` 负责 TCP 分帧，`gcore.GameMessage` 是可选的游戏消息信封：协议版本、标志、消息类型、序列号、玩家 ID、房间 ID 和消息体。TCP 框架不要求使用它。以下消息常量来自 `Ginx/examples/gameprotocol`。
 
 ```go
 gameMessage := gcore.NewGameMessage(
-    gcore.GameMsgPlayerMove,
+    gameprotocol.GameMsgPlayerMove,
     sequence,
     playerID,
     roomID,
@@ -64,7 +64,7 @@ if err == nil {
 }
 ```
 
-协议使用小端序并带有 Magic、版本和长度校验。解包时使用 `DecodeGameMessage`，不要绕过校验直接读取字节。新增消息类型时在 `gcore/protocol.go` 集中定义，避免在多个路由文件中散落魔法数字。
+协议使用小端序并带有 Magic、版本和长度校验。解包时使用 `DecodeGameMessage`，不要绕过校验直接读取字节。新增业务消息类型应在应用自己的协议包集中定义，可参考 `examples/gameprotocol/messages.go`。`gcore` 中同名旧常量仅用于兼容，已标记 Deprecated，不再扩展。
 
 ## 日志体系
 

@@ -3,7 +3,6 @@ package gnet
 import (
 	"Ginx/gface"
 	"Ginx/metrics"
-	"Ginx/utils"
 	"errors"
 	"fmt"
 	"runtime/debug"
@@ -23,18 +22,29 @@ type MsgHandle struct {
 	workerPoolOnce    sync.Once
 	workerPoolStarted atomic.Bool
 	workerPoolWait    sync.WaitGroup
+	stopSignalOnce    sync.Once
+	stopPoolOnce      sync.Once
+	stopChan          chan struct{}
 	taskQueueLock     sync.RWMutex
 	panicHandlerLock  sync.RWMutex
 	panicHandler      func(gface.IRequest, interface{}, []byte)
 	metrics           *metrics.Metrics
+	config            *Config
 }
 
 func NewMsgHandle() *MsgHandle {
+	return newMsgHandle(nil)
+}
+
+func newMsgHandle(config *Config) *MsgHandle {
+	settings := effectiveConfig(config)
 	return &MsgHandle{
+		stopChan:       make(chan struct{}),
+		config:         config,
 		Apis:           make(map[uint32]gface.IRouter),
-		WorkerPoolSize: utils.GlobalObject.WorkerPoolSize,
+		WorkerPoolSize: settings.WorkerPoolSize,
 		//一个worker对应一个queue
-		TaskQueue: make([]chan gface.IRequest, utils.GlobalObject.WorkerPoolSize),
+		TaskQueue: make([]chan gface.IRequest, settings.WorkerPoolSize),
 	}
 }
 
@@ -113,10 +123,16 @@ func (mh *MsgHandle) StartWorkerPool() {
 	mh.workerPoolOnce.Do(func() {
 		//遍历需要启动worker的数量，依此启动
 		mh.taskQueueLock.Lock()
+		select {
+		case <-mh.stopChan:
+			mh.taskQueueLock.Unlock()
+			return
+		default:
+		}
 		for i := 0; i < int(mh.WorkerPoolSize); i++ {
 			//一个worker被启动
 			//给当前worker对应的任务队列开辟空间
-			mh.TaskQueue[i] = make(chan gface.IRequest, utils.GlobalObject.MaxWorkerTaskLen)
+			mh.TaskQueue[i] = make(chan gface.IRequest, effectiveConfig(mh.config).MaxWorkerTaskLen)
 		}
 
 		mh.workerPoolWait.Add(int(mh.WorkerPoolSize))
@@ -133,38 +149,42 @@ func (mh *MsgHandle) StartWorkerPool() {
 }
 
 func (mh *MsgHandle) StopWorkerPool() {
-	if !mh.workerPoolStarted.Load() {
-		return
-	}
-
-	mh.taskQueueLock.Lock()
-	if !mh.workerPoolStarted.Load() {
-		mh.taskQueueLock.Unlock()
-		return
-	}
-	for _, taskQueue := range mh.TaskQueue {
-		close(taskQueue)
-	}
-	mh.workerPoolStarted.Store(false)
-	mh.taskQueueLock.Unlock()
-
+	mh.beginStop()
+	mh.stopPoolOnce.Do(func() {
+		mh.taskQueueLock.Lock()
+		defer mh.taskQueueLock.Unlock()
+		if mh.workerPoolStarted.Load() {
+			for _, taskQueue := range mh.TaskQueue {
+				close(taskQueue)
+			}
+			mh.workerPoolStarted.Store(false)
+		}
+	})
+	// 停服后的所有调用者都等待同一组任务，包括零 Worker 模式。
 	mh.workerPoolWait.Wait()
+}
+
+func (mh *MsgHandle) beginStop() {
+	mh.stopSignalOnce.Do(func() { close(mh.stopChan) })
 }
 
 // 将消息交给TaskQueue,由worker进行处理
 func (mh *MsgHandle) SendMsgToTaskQueue(request gface.IRequest) error {
-	if mh.WorkerPoolSize == 0 {
-		go mh.DoMsgHandler(request)
-		return nil
-	}
-
 	mh.taskQueueLock.RLock()
+	defer mh.taskQueueLock.RUnlock()
+	select {
+	case <-mh.stopChan:
+		return ErrWorkerStopped
+	default:
+	}
 	if !mh.workerPoolStarted.Load() {
-		mh.taskQueueLock.RUnlock()
-		go mh.DoMsgHandler(request)
+		mh.workerPoolWait.Add(1)
+		go func() {
+			defer mh.workerPoolWait.Done()
+			mh.DoMsgHandler(request)
+		}()
 		return nil
 	}
-	defer mh.taskQueueLock.RUnlock()
 
 	//根据ConnID来分配当前的连接应该由哪个worker负责处理
 	//轮询的平均分配法则
@@ -174,7 +194,7 @@ func (mh *MsgHandle) SendMsgToTaskQueue(request gface.IRequest) error {
 	fmt.Println("Add ConnID=", request.GetConnection().GetConnId(), " request msgID=", request.GetMsgID(), "to workerID=", workerID)
 	//将请求消息发送给任务队列
 	queue := mh.TaskQueue[workerID]
-	waitTime := time.Duration(utils.GlobalObject.WorkerTaskQueueWaitTime) * time.Millisecond
+	waitTime := time.Duration(effectiveConfig(mh.config).WorkerTaskQueueWaitTime) * time.Millisecond
 	if waitTime <= 0 {
 		select {
 		case queue <- request:
@@ -189,6 +209,10 @@ func (mh *MsgHandle) SendMsgToTaskQueue(request gface.IRequest) error {
 	select {
 	case queue <- request:
 		return nil
+	case <-mh.stopChan:
+		return ErrWorkerStopped
+	case <-gface.RequestContext(request).Done():
+		return gface.RequestContext(request).Err()
 	case <-timer.C:
 		return errors.New("worker task queue wait timeout")
 	}

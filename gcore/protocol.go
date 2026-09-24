@@ -21,34 +21,13 @@ const (
 type GameMessageID uint16
 
 const (
-	// GameMsgLoginRequest 表示登录请求。
-	GameMsgLoginRequest GameMessageID = 1001
-	// GameMsgLoginResponse 表示登录响应。
-	GameMsgLoginResponse GameMessageID = 1002
-	// GameMsgEnterRoomRequest 表示进入房间请求。
-	GameMsgEnterRoomRequest GameMessageID = 2001
-	// GameMsgEnterRoomResponse 表示进入房间响应。
-	GameMsgEnterRoomResponse GameMessageID = 2002
-	// GameMsgLeaveRoomRequest 表示离开房间请求。
-	GameMsgLeaveRoomRequest GameMessageID = 2003
-	// GameMsgRoomBroadcast 表示房间广播消息。
-	GameMsgRoomBroadcast GameMessageID = 2004
-	// GameMsgPlayerMove 表示玩家移动消息。
-	GameMsgPlayerMove GameMessageID = 3001
-	// GameMsgAOIChange 表示 AOI 视野变化消息。
-	GameMsgAOIChange GameMessageID = 3002
-	// GameMsgHeartbeat 表示游戏层心跳消息。
-	GameMsgHeartbeat GameMessageID = 9001
-)
-
-const (
 	// GameMessageFlagReliable 表示业务层希望可靠处理的消息。
 	GameMessageFlagReliable uint8 = 1 << iota
 	// GameMessageFlagResponse 表示该消息是对请求的响应。
 	GameMessageFlagResponse
 )
 
-// GameMessage 是 DataPack 之上的游戏业务消息。
+// GameMessage 是可选的游戏上下文信封，不规定业务消息编号。
 //
 // Ginx 的 DataPack 负责 TCP 分帧，本结构负责记录版本、消息类型、序列号、
 // 玩家和房间上下文。Encode 结果可以直接作为 DataPack 的消息体发送。

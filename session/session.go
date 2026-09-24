@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -16,70 +15,43 @@ type Session struct {
 	AccountID string
 	PlayerID  uint64
 	ConnID    uint32
+	Bound     bool
+	ExpiresAt time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
 // Manager 管理账号、玩家、连接和 Token 之间的映射关系。
 type Manager struct {
-	nextPlayerID atomic.Uint64
-	lock         sync.RWMutex
-	byToken      map[string]*Session
-	byAccountID  map[string]string
-	byPlayerID   map[uint64]string
-	byConnID     map[uint32]string
+	legacy        *legacyState
+	accountPolicy AccountPolicy
+	lock          sync.RWMutex
+	byToken       map[string]*Session
+	byAccountID   map[string]string
+	byPlayerID    map[uint64]string
+	byConnID      map[uint32]string
 }
 
-// NewManager 创建一个会话管理器，生成的 PlayerID 从 startPlayerID 之后开始递增。
-func NewManager(startPlayerID uint64) *Manager {
-	manager := &Manager{
-		byToken:     make(map[string]*Session),
-		byAccountID: make(map[string]string),
-		byPlayerID:  make(map[uint64]string),
-		byConnID:    make(map[uint32]string),
-	}
-	manager.nextPlayerID.Store(startPlayerID)
-	return manager
-}
+// AccountPolicy 明确选择同账号已有会话时的处理方式。
+type AccountPolicy uint8
 
-// Login 创建一个新会话，并返回同账号被替换的旧会话。
-func (m *Manager) Login(accountID string, connID uint32) (*Session, *Session, error) {
-	if m == nil {
-		return nil, nil, errors.New("session manager is nil")
-	}
-	if accountID == "" {
-		return nil, nil, errors.New("account id is empty")
-	}
+const (
+	RejectExisting AccountPolicy = iota
+	ReplaceExisting
+)
 
-	token, err := createToken()
-	if err != nil {
-		return nil, nil, err
-	}
-	now := time.Now()
-	session := &Session{
-		Token:     token,
-		AccountID: accountID,
-		PlayerID:  m.nextPlayerID.Add(1),
-		ConnID:    connID,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
+type Options struct{ AccountPolicy AccountPolicy }
 
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	var replaced *Session
-	if oldToken, ok := m.byAccountID[accountID]; ok {
-		replaced = sessionCopy(m.byToken[oldToken])
-		m.removeLocked(oldToken)
+var ErrAccountActive = errors.New("account already has an active session")
+
+// New 创建可选的单账号单会话组件，不分配玩家编号、不读取配置。
+// 多设备会话应由应用使用不同的会话模型，本组件不隐式开启多登录。
+func New(options Options) (*Manager, error) {
+	if options.AccountPolicy != RejectExisting && options.AccountPolicy != ReplaceExisting {
+		return nil, errors.New("invalid account policy")
 	}
-	if oldToken, ok := m.byConnID[connID]; ok {
-		m.removeLocked(oldToken)
-	}
-	m.byToken[token] = session
-	m.byAccountID[accountID] = token
-	m.byPlayerID[session.PlayerID] = token
-	m.byConnID[connID] = token
-	return sessionCopy(session), replaced, nil
+	return &Manager{accountPolicy: options.AccountPolicy, byToken: make(map[string]*Session),
+		byAccountID: make(map[string]string), byPlayerID: make(map[uint64]string), byConnID: make(map[uint32]string)}, nil
 }
 
 // GetByToken 根据 Token 获取会话快照。
@@ -90,7 +62,7 @@ func (m *Manager) GetByToken(token string) (*Session, error) {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	session, ok := m.byToken[token]
-	if !ok {
+	if !ok || expired(session, time.Now()) {
 		return nil, errors.New("session not found")
 	}
 	return sessionCopy(session), nil
@@ -107,7 +79,11 @@ func (m *Manager) GetByConnID(connID uint32) (*Session, error) {
 	if !ok {
 		return nil, errors.New("session not found")
 	}
-	return sessionCopy(m.byToken[token]), nil
+	value := m.byToken[token]
+	if expired(value, time.Now()) {
+		return nil, errors.New("session expired")
+	}
+	return sessionCopy(value), nil
 }
 
 // GetByPlayerID 根据玩家 ID 获取会话快照。
@@ -121,7 +97,11 @@ func (m *Manager) GetByPlayerID(playerID uint64) (*Session, error) {
 	if !ok {
 		return nil, errors.New("session not found")
 	}
-	return sessionCopy(m.byToken[token]), nil
+	value := m.byToken[token]
+	if expired(value, time.Now()) {
+		return nil, errors.New("session expired")
+	}
+	return sessionCopy(value), nil
 }
 
 // Touch 刷新会话最后活跃时间。
@@ -132,7 +112,7 @@ func (m *Manager) Touch(token string) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	session, ok := m.byToken[token]
-	if !ok {
+	if !ok || expired(session, time.Now()) {
 		return errors.New("session not found")
 	}
 	session.UpdatedAt = time.Now()
@@ -171,7 +151,7 @@ func (m *Manager) LogoutByConnID(connID uint32) (*Session, error) {
 	return session, nil
 }
 
-// Len 返回当前在线会话数量。
+// Len 返回当前保存的会话数量，包括尚未绑定及等待回收的会话。
 func (m *Manager) Len() int {
 	if m == nil {
 		return 0
@@ -189,7 +169,85 @@ func (m *Manager) removeLocked(token string) {
 	delete(m.byToken, token)
 	delete(m.byAccountID, session.AccountID)
 	delete(m.byPlayerID, session.PlayerID)
-	delete(m.byConnID, session.ConnID)
+	if session.Bound && m.byConnID[session.ConnID] == token {
+		delete(m.byConnID, session.ConnID)
+	}
+}
+
+// Issue 为已验证的稳定玩家身份签发尚未绑定 TCP 连接的会话。
+// 返回被替换的会话，由应用层清理旧连接及房间。
+func (m *Manager) Issue(accountID string, playerID uint64, ttl time.Duration) (*Session, *Session, error) {
+	if m == nil || accountID == "" || playerID == 0 || ttl <= 0 {
+		return nil, nil, errors.New("invalid session identity or lifetime")
+	}
+	token, err := createToken()
+	if err != nil {
+		return nil, nil, err
+	}
+	now := time.Now()
+	value := &Session{Token: token, AccountID: accountID, PlayerID: playerID, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(ttl)}
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	if oldToken, ok := m.byPlayerID[playerID]; ok && m.byToken[oldToken].AccountID != accountID {
+		return nil, nil, errors.New("player belongs to another account")
+	}
+	var replaced *Session
+	if oldToken, ok := m.byAccountID[accountID]; ok {
+		if m.accountPolicy == RejectExisting && !expired(m.byToken[oldToken], now) {
+			return nil, nil, ErrAccountActive
+		}
+		replaced = sessionCopy(m.byToken[oldToken])
+		m.removeLocked(oldToken)
+	}
+	m.byToken[token] = value
+	m.byAccountID[accountID] = token
+	m.byPlayerID[playerID] = token
+	m.observeLegacyID(playerID)
+	return sessionCopy(value), replaced, nil
+}
+
+// Bind 将有效 Token 绑定到连接；连接 ID 0 也是合法值。
+// 重复绑定同一连接幂等，不允许跨连接抢占或在连接上切换身份。
+func (m *Manager) Bind(token string, connID uint32) (*Session, error) {
+	if m == nil {
+		return nil, errors.New("session manager is nil")
+	}
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	value, ok := m.byToken[token]
+	if !ok || expired(value, time.Now()) {
+		return nil, errors.New("invalid or expired token")
+	}
+	if value.Bound && value.ConnID != connID {
+		return nil, errors.New("token already bound")
+	}
+	if other, ok := m.byConnID[connID]; ok && other != token {
+		return nil, errors.New("connection already authenticated")
+	}
+	value.ConnID, value.Bound, value.UpdatedAt = connID, true, time.Now()
+	m.byConnID[connID] = token
+	return sessionCopy(value), nil
+}
+
+// RemoveExpired 移除到期会话，返回快照供应用层关闭连接、清理房间。
+func (m *Manager) RemoveExpired(now time.Time) []Session {
+	if m == nil {
+		return nil
+	}
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	removed := make([]Session, 0)
+	for token, value := range m.byToken {
+		if expired(value, now) {
+			removed = append(removed, *value)
+			m.removeLocked(token)
+		}
+	}
+	return removed
+}
+
+func expired(value *Session, now time.Time) bool {
+	return !value.ExpiresAt.IsZero() && !now.Before(value.ExpiresAt)
 }
 
 func createToken() (string, error) {

@@ -4,6 +4,7 @@ import (
 	"Ginx/gface"
 	"Ginx/gnet"
 	"Ginx/utils"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -211,7 +212,7 @@ func TestConnectionBufferedMessageRejectsAfterStop(t *testing.T) {
 	defer server.Close()
 
 	connection.Stop()
-	if err := connection.SendBuffMsg(10, []byte("closed")); err == nil || err.Error() != "Connection closed when send buff msg" {
+	if err := connection.SendBuffMsg(10, []byte("closed")); !errors.Is(err, gnet.ErrConnectionClosed) {
 		t.Fatalf("SendBuffMsg() after Stop() error = %v, want closed error", err)
 	}
 }

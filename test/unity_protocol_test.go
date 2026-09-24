@@ -1,7 +1,7 @@
 package test
 
 import (
-	"Ginx/unity"
+	"Ginx/examples/unity"
 	"testing"
 )
 

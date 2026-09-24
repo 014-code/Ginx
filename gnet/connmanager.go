@@ -2,7 +2,6 @@ package gnet
 
 import (
 	"Ginx/gface"
-	"Ginx/utils"
 	"errors"
 	"sync"
 )
@@ -12,10 +11,16 @@ type ConnManager struct {
 	connections map[uint32]gface.IConnection
 	//读写锁
 	connLock sync.RWMutex
+	config   *Config
 }
 
 func NewConnManager() *ConnManager {
+	return newConnManager(nil)
+}
+
+func newConnManager(config *Config) *ConnManager {
 	return &ConnManager{
+		config:      config,
 		connections: make(map[uint32]gface.IConnection),
 	}
 }
@@ -34,7 +39,8 @@ func (cm *ConnManager) Add(conn gface.IConnection) error {
 	if _, ok := cm.connections[connID]; ok {
 		return errors.New("connection id already exists")
 	}
-	if utils.GlobalObject.MaxConn > 0 && len(cm.connections) >= utils.GlobalObject.MaxConn {
+	maxConn := effectiveConfig(cm.config).MaxConn
+	if maxConn > 0 && len(cm.connections) >= maxConn {
 		return errors.New("maximum connections reached")
 	}
 
