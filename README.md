@@ -14,20 +14,7 @@ Ginx is a lightweight Go game-server framework with length-prefixed messages, me
 
 ### Quick start
 
-Run commands from the repository root so `config/ginx.json` is loaded:
-
-```powershell
-go run ./main/server
-```
-
-The example server registers message IDs `0` and `1`. Run the matching clients in separate terminals:
-
-```powershell
-go run ./main/client0
-go run ./main/client1
-```
-
-A complete tutorial example is available in `main/tutorial`:
+Run the complete tutorial from the repository root so `config/ginx.json` is loaded:
 
 ```powershell
 go run ./main/tutorial/server
@@ -66,20 +53,7 @@ Ginx 是一个轻量级 Go 游戏服务端框架，提供长度前缀消息协�
 
 ### 快速开始
 
-请在项目根目录运行以下命令，确保能加载 `config/ginx.json`：
-
-```powershell
-go run ./main/server
-```
-
-示例服务注册了消息 ID `0` 和 `1`。请在两个独立终端中运行对应客户端：
-
-```powershell
-go run ./main/client0
-go run ./main/client1
-```
-
-完整教程示例位于 `main/tutorial` 目录：
+请在项目根目录运行完整教程示例，确保能加载 `config/ginx.json`：
 
 ```powershell
 go run ./main/tutorial/server

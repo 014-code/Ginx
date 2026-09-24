@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"Ginx/gface"
 	"encoding/json"
 	"io/ioutil"
 )
@@ -11,11 +10,9 @@ import (
 一些参数也可以通过 用户根据 zinx.json来配置
 */
 type GlobalObj struct {
-	TcpServer gface.IServer //当前Zinx的全局Server对象
-	Host      string        //当前服务器主机IP
-	TcpPort   int           //当前服务器主机监听端口号
-	Name      string        //当前服务器名称
-	Version   string        //当前Zinx版本号
+	Host    string //当前服务器主机IP
+	TcpPort int    //当前服务器主机监听端口号
+	Name    string //当前服务器名称
 
 	MaxPacketSize           uint32 //都需数据包的最大值
 	MaxMsgChanLen           uint32 //连接发送消息缓冲队列的最大长度
@@ -26,8 +23,6 @@ type GlobalObj struct {
 	HeartbeatMax            int    //当前连接允许的最大心跳超时时间，单位秒
 	MessageRateLimit        int    //每条连接每秒允许处理的最大消息数，0表示关闭
 	MessageRateBurst        int    //每条连接允许的突发消息数，0表示使用MessageRateLimit
-
-	ConfFilePath string
 }
 
 /*
@@ -59,13 +54,11 @@ func init() {
 	//初始化GlobalObject变量，设置一些默认值
 	GlobalObject = &GlobalObj{
 		Name:                    "ZinxServerApp",
-		Version:                 "V0.4",
 		TcpPort:                 7777,
 		Host:                    "0.0.0.0",
 		MaxConn:                 12000,
 		MaxPacketSize:           4096,
 		MaxMsgChanLen:           1024,
-		ConfFilePath:            "conf/ginx.json",
 		WorkerPoolSize:          10,
 		MaxWorkerTaskLen:        1024,
 		WorkerTaskQueueWaitTime: 100,

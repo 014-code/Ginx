@@ -95,7 +95,7 @@ func (mh *MsgHandle) AddRouter(msgId uint32, router gface.IRouter) {
 }
 
 // 启动一个Worker工作流程
-func (mh *MsgHandle) StartOneWorker(workerID int, taskQueue chan gface.IRequest) {
+func (mh *MsgHandle) startOneWorker(workerID int, taskQueue chan gface.IRequest) {
 	fmt.Println("Worker ID = ", workerID, " is started.")
 	//不断的等待队列中的消息
 	for request := range taskQueue {
@@ -126,7 +126,7 @@ func (mh *MsgHandle) StartWorkerPool() {
 			//启动当前Worker，阻塞的等待对应的任务队列是否有消息传递进来
 			go func(workerID int) {
 				defer mh.workerPoolWait.Done()
-				mh.StartOneWorker(workerID, mh.TaskQueue[workerID])
+				mh.startOneWorker(workerID, mh.TaskQueue[workerID])
 			}(i)
 		}
 	})

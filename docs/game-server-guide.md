@@ -23,7 +23,7 @@
 从项目根目录启动示例服务：
 
 ```powershell
-go run ./main/server
+go run ./main/tutorial/server
 ```
 
 示例服务默认监听 `127.0.0.1:7777`。配置文件是 `config/ginx.json`，支持以下字段：

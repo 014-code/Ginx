@@ -26,15 +26,5 @@ type IConnection interface {
 	RemoveProperty(key string)
 }
 
-/*
-*
-函数类型：连接时的处理
-参数1：socket原生连接
-参数2：客户端请求的数据
-参数3：客户端请求的数据长度
-返回值：错误内容
-*/
-type HandFunc func(*net.TCPConn, []byte, int) error
-
 // 连接生命周期回调方法
 type HookFunc func(connection IConnection)

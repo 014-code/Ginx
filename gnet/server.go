@@ -4,7 +4,6 @@ import (
 	"Ginx/gface"
 	"Ginx/metrics"
 	"Ginx/utils"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -55,16 +54,6 @@ func (s *Server) GetMetrics() metrics.Snapshot {
 		return metrics.Snapshot{}
 	}
 	return s.metrics.Snapshot()
-}
-
-// 当前客户端连接的回调方法
-func CallBackToClient(conn *net.TCPConn, data []byte, cnt int) error {
-	fmt.Println("[Conn Handle] CallBackToClient ... ")
-	if _, err := conn.Write(data[:cnt]); err != nil {
-		fmt.Println("write back buf err ", err)
-		return errors.New("CallBackToClient error")
-	}
-	return nil
 }
 
 func (s *Server) Start() {

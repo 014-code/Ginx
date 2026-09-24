@@ -41,7 +41,7 @@ go run ./main/unityserver
 127.0.0.1:7777
 ```
 
-不要使用 `go run ./main/server` 与 Unity 联调。`main/server` 是消息 ID `0` 和 `1` 的 Ping/Hello 基础示例，不包含 MMO Protobuf 路由。
+不要使用 `go run ./main/tutorial/server` 与 Unity 联调。教程服务端不包含 MMO Protobuf 路由。
 
 ### 2.2 启动 Unity 客户端
 

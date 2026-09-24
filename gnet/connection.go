@@ -289,8 +289,3 @@ func (c *Connection) GetConnection() net.Conn {
 func (c *Connection) GetTCPConnection() *net.TCPConn {
 	return c.Conn
 }
-
-// 获取远程客户端地址方法
-func (c *Connection) GetRemoteAddr() net.Addr {
-	return c.Conn.RemoteAddr()
-}
