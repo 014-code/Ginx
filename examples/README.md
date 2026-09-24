@@ -7,6 +7,7 @@
 | --- | --- |
 | `gameserver` | 可运行的 HTTP + TCP 服务入口 |
 | `gameapp` | 共享会话、房间、HTTP/TCP 路由与成长规则 |
+| `webgame` | Vue 3 + TS + Phaser 浏览器联机竞技场，WS→TCP 实测 Ginx；独立 Docker 一键启动 |
 | `gameapp/protocol` | 从 `schema/gameapp.json` 生成的 TCP 消息编号与请求/响应结构 |
 | `sqlitestore` | 纯 Go SQLite 驱动与事务存档适配器，不需要 C 编译器 |
 | `gameclient` | 登录、鉴权、入房、领奖、消耗、查询的命令行客户端 |

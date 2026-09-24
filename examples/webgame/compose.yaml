@@ -1,0 +1,13 @@
+services:
+  webgame:
+    build:
+      context: ../..
+      dockerfile: examples/webgame/Dockerfile
+    ports:
+      - "127.0.0.1:${GINX_WEB_PORT:-8090}:8090"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 256m
+    stop_grace_period: 15s

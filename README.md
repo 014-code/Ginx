@@ -1,5 +1,19 @@
 # Ginx
 
+## 浏览器联机 Demo
+
+`examples/webgame/` 是独立的 Vue 3 + TypeScript + Phaser Web 游戏示例：双人进入同一房间、
+移动采集水晶、观察服务端计分及运行指标。浏览器通过 WebSocket → `wsbridge` → Ginx TCP
+链路，实际经过 Worker、鉴权路由、Room 广播与 AOI。玩法只在示例中，核心接口不变。
+
+```powershell
+pwsh -File examples/webgame/start.ps1
+```
+
+需要 Docker Desktop 和 PowerShell 7；访问 `http://127.0.0.1:8090`。
+临时访客与内存分数仅供本地演示。详见 [运行说明](examples/webgame/README.md)
+和 [桥接协议](docs/webgame-guide.md)。
+
 ## 协议开发工具链
 
 `tools/protocolgen` 提供 Python 标准库实现的通用协议生成器：从 JSON 定义生成 Go

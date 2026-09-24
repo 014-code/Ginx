@@ -32,6 +32,7 @@ Ginx 是一个面向游戏服务端的 Go TCP 框架，当前已经具备以下�
 | `docs/` | 游戏服务端使用说明和教程文档。 |
 | `tools/protocolgen/` | Python 标准库协议生成、定义校验和兼容性检查，构建期使用。 |
 | `schema/` | 应用协议定义，消息 ID 和业务字段不属于框架 API。 |
+| `wsbridge/` | 可选固定上游 WebSocket→TCP 桥接，独立关闭生命周期；不实现身份或玩法。 |
 
 ## 核心架构
 
@@ -209,6 +210,14 @@ test(worker): cover queue shutdown
 不要手改生成代码、协议表或 lock；兼容性比较使用独立的已发布定义，通过 `--baseline` 指定。
 不要把工具、Python 运行时或生成的业务定义引入 `gnet`/`gface`/`gcore`。完整约定见
 `docs/protocol-toolchain.md`。
+
+## Web 游戏示例与桥接
+
+`examples/webgame/` 独立拥有 Vue/TS/Phaser 前端、访客认证、房间世界、移动与计分规则。
+它不改变现有 TCP API。`wsbridge` 复用 DataPack，要求每条二进制 WS 消息恰好一包，
+必须校验 Origin、大小、容量和超时；应用停止时显式 Close，不能只停 http.Server。
+新增 Go 测试仍在 `test/`；浏览器测试在 `test/webgame/`，从 frontend 执行 `npm run test:e2e`。
+前端依赖锁文件必须提交，node_modules/dist/测试截图不提交。运行指南见 `docs/webgame-guide.md`。
 
 ## Runtime Service Modules
 

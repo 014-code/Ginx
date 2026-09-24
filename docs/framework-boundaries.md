@@ -6,11 +6,13 @@ Ginx 是 TCP 框架，并提供可选的游戏服务组件。框架不规定账�
 | --- | --- | --- |
 | 核心 | `gface`、`gnet` | 连接生命周期、消息分帧、路由、Worker、收发背压 |
 | 基础设施 | `utils`、`limit`、`metrics` | 显式配置、限流、运行指标 |
+| 可选传输适配 | `wsbridge` | 固定上游 WS→TCP 桥接，包长、Origin、容量、超时和隧道关闭；不解释玩法 |
 | 构建工具 | `tools/protocolgen` | Python 协议定义校验、代码/文档生成与兼容性检查，不进入运行时 |
 | 可选组件 | `gcore` | AOI 空间查询、房间成员与广播、消息信封、结构化日志 |
 | 可选组件 | `session`、`persist` | 单账号单会话映射、玩家形状的存储接口及内存/JSON 实现 |
 | 示例应用 | `examples/gameapp`、`gameserver`、`gameclient`、`sqlitestore` | Gin 登录、TCP 鉴权、房间流程、等级/背包与 SQLite 事务 |
 | 示例应用 | `examples/unity`、`unityserver`、`gameprotocol` | Unity 协议与玩家世界、访客编号、业务消息 ID |
+| 示例应用 | `examples/webgame` | Vue/TS/Phaser 页面、访客、权威移动采集世界、房间诊断，不提供持久化 |
 | 兼容层 | `main/unityserver`、已弃用符号 | 保留旧启动入口和部分旧 API，不增加新业务能力 |
 
 核心及可选组件不导入示例、Gin 或 SQLite。根 `go.mod` 仍共享示例依赖，但构建 TCP 核心不需要编译这些驱动。`persist.PlayerStore` 和 `gcore.GameMessage` 都不是使用 TCP 框架的前提；应用可以有自己的存储模型和消息体。

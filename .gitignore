@@ -3,3 +3,7 @@ config/accounts.local.json
 data/
 __pycache__/
 *.py[cod]
+node_modules/
+examples/webgame/frontend/dist/
+examples/webgame/frontend/test-results/
+examples/webgame/frontend/playwright-report/
